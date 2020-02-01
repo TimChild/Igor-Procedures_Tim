@@ -5,6 +5,29 @@
 
 
 
+
+
+macro DCleakagetest()  // Used ~ Jan2020
+	rampmultiplebd(bd6, "12", 0, ramprate=1000)
+	timsleep(1)
+	print read34401A(dmm4)
+	rampmultiplebd(bd6, "12", 30, ramprate=1000)
+	timsleep(2)
+	print read34401A(dmm4)
+	doAlert/T="Massive jump?" 1, "Want to continue?"
+	if(V_flag == 2)
+		rampmultiplebd(bd6, "12", 0, ramprate=1000)
+		abort "Aborted, something wrong with DC current"
+	endif
+	rampmultiplebd(bd6, "12", -250, ramprate=1000)
+	timsleep(5)
+	scanbabydac(bd6, -250, 250, "12", 101, 0.001, 1000)
+	rampmultiplebd(bd6, "12", 0, ramprate=1000)
+
+end
+
+
+
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 //////////////////////////////// Scans /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -30,15 +53,21 @@ function ReadVsTime(delay, [comments]) // Units: s
 	SaveWaves(msg=comments)
 end
 
-function ScanFastDacRepeat(fastdac, startx, finx, channelsx, numptsx, numptsy, delayy, xlabel, [offsetx, comments]) //Units: mV, mT
+function ScanFastDacRepeat(fastdac, startx, finx, channelsx, numptsx, numptsy, delayy, xlabel, [offsetx, comments, RCcutoff, numAverage, notch]) //Units: mV, mT
 	// x-axis is the dac sweep
 	// y-axis is an index
 	// this will sweep: start -> fin, fin -> start, start -> fin, ....
 	// each sweep (whether up or down) will count as 1 y-index
+	// Data processing:
+	// 		- RCcutoff set the lowpass cutoff frequency
+	//		- average set the number of points to average
+	//		- nocth sets the notch frequencie, as a comma seperated list (width is fixed at 5Hz)
 
-	variable fastdac, startx, finx, numptsx, delayx, numptsy, delayy, offsetx
-	string xlabel, channelsx, comments
-	variable i=0, j=0, setpointx, setpointy
+	//TODO: Make this work with multiple channels. Each comma separated channel needs a comma separated start and fin string
+
+	variable fastdac, startx, finx, numptsx, numptsy, delayy, offsetx, RCcutoff, numAverage
+	string xlabel, channelsx, comments, notch
+	variable i=0, setpointx, setpointy
 	string x_label, y_label
 
 	if(paramisdefault(comments))
@@ -57,441 +86,240 @@ function ScanFastDacRepeat(fastdac, startx, finx, channelsx, numptsx, numptsy, d
 	variable starty = 0, finy = numptsy-1, scandirection=0
 	InitializeWaves(startx, finx, numptsx, starty=starty, finy=finy, numptsy=numptsy, x_label=x_label, y_label=y_label, fastdac=1)
 
-	// set starting values
-	setpointx = startx-offsetx
 	//RampMultipleBD(instrID, channelsx, setpointx, ramprate=rampratex)
-
-	wave/t oldfdvaluestring
-
-	fd1d(fastdac, channelsx, str2num(oldfdValueString[str2num(channelsx)]), setpointx, 500, 1e-6)
+	
+	rampOutputfdac(fastdac, str2num(channelsx), startx)
 	sc_sleep(0.2)
+	string sx, fx  //startx and finx (which will switch back and forth between real startx and finx)
 	do
 		if(mod(i,2)==0)
-			j=0
-			scandirection=1
+			sx = num2str(startx)
+			fx = num2str(finx)
 		else
-			j=numptsx-1
-			scandirection=-1
+			sx = num2str(finx)
+			fx = num2str(startx)
 		endif
 
-		setpointx = startx - offsetx + (j*(finx-startx)/(numptsx-1)) // reset start point
-		rampOutputfdac(fastdac, channelsx, setpointx, ramprate=1000)
-		fd1d(fastdac, channelsx, str2num(oldfdValueString[str2num(channelsx)]), setpointx, 500, 1e-6)
+		rampOutputfdac(fastdac, str2num(channelsx), str2num(sx))
 		sc_sleep(delayy) // wait at start point
-		do
-			setpointx = startx - offsetx + (j*(finx-startx)/(numptsx-1))
-			//RampMultipleBD(instrID, channelsx, setpointx, ramprate=rampratex)
-			fd1d(fastdac, channelsx, str2num(oldfdValueString[str2num(channelsx)]), setpointx, 5, 1e-6)
-			sc_sleep(delayx)
-			RecordValues(i, j)
-			j+=scandirection
-		while (j>-1 && j<numptsx)
+		fdacRecordValues(fastdac, i, channelsx, sx, fx, numptsx, RCcutoff=RCcutoff, numAverage=numAverage, notch=notch)  //1D sweep either forwards or backwards
 		i+=1
 	while (i<numptsy)
-	SaveWaves(msg=comments)
+	SaveWaves(msg=comments, fastdac=1)
 end
 
 
-function ScanFastDac2D(bd, fd, startx, finx, channelsx, numptsx, starty, finy, channelsy, numptsy, [delayy, delayx, ramprate, ADCchannels, xlabel, setchargesensor, printramptimes]) // Use either numpts or maxramprate to determine numpts whichever constrains more
-	//																									mV/s
-	variable bd, fd, startx, finx, numptsx, starty, finy, numptsy, delayy, delayx, ramprate, setchargesensor, printramptimes
-	string channelsx, channelsy, ADCchannels, xlabel
+function ScanFastDAC(fd, start, fin, channels, numpts, ramprate, [comments, nosave, RCcutoff, numAverage, notch]) //Units: mV
+	variable fd, start, fin, numpts, ramprate, nosave, RCcutoff, numAverage
+	string channels, comments, notch
+	string x_label
+
+	if(paramisdefault(comments))
+	comments=""
+	endif
+
+	x_label = GetLabel(channels)
+
+	//Ramp to start
+	rampOutputfdac(fd, str2num(channels), start, ramprate=ramprate)
+	sc_sleep(0.5)
+	InitializeWaves(start, fin, numpts, x_label=x_label, fastdac=1)
+	fdacRecordValues(fd, 0, channels, num2str(start), num2str(fin), numpts, RCcutoff=RCcutoff, numAverage=numAverage, notch=notch)
+	
+	if (nosave == 0)
+  		SaveWaves(msg=comments)
+  	else
+  		dowindow /k SweepControl
+	endif
+
+end
+
+
+function ScanFastDac2D(bd, fd, startx, finx, channelsx, numptsx, starty, finy, channelsy, numptsy, [delayy, ramprate, setchargesensor, comments, RCcutoff, numAverage, notch])
+	//ramprate is how fast to ramp back to beginning of scan
+	variable bd, fd, startx, finx, numptsx, starty, finy, numptsy, delayy, ramprate, setchargesensor, RCcutoff, numAverage
+	string channelsx, channelsy, notch, comments
 
 	variable/g sc_scanstarttime = datetime
 
-
 	ramprate = paramisdefault(ramprate) ? 5000 : ramprate
-	delayx = paramisdefault(delayx) ? 1e-6 : delayx //about 1e-3 is where it starts to slow down
-
-
-	if (paramisdefault(ADCchannels))
-		ADCchannels = "0"
-	endif
 
 	string/g sc_y_label, sc_x_label
-	if (!paramisdefault(xlabel))
-		sc_x_label = xlabel
-	else
-		sc_x_label = "FD not named"
-	endif
+	//sc_x_label = getfdlabel(channelsx)
+	//TODO: Make getfdlabel
 	sc_y_label = getlabel(channelsy)
 
-	InitializeFastScan2D(startx, finx, numptsx, starty, finy, numptsy, ADCchannels)
-	wave FastScan_2d, FastScanCh0, FastScanCh1, FastScanCh0_2d, FastscanCh1_2d, FastScanCh2, FastScanCh3, FastScanCh2_2d, FastscanCh3_2d
+	InitializeWaves(startx, finx, numptsx, starty=starty, finy=finy, numptsy=numptsy, x_label=sc_x_label, y_label=sc_y_label, fastdac=1)
 
-	if (printramptimes==1)
-		printf "Ramp times in s are: "
-	endif
-
-	variable i, delay = delayx, rt
-	wave FastScan
+	variable i, rt
 	rampmultiplebd(bd, channelsy, starty, ramprate=1000)
-		i = 0
+	rampOutputfdac(fd, str2num(channelsx), startx, ramprate=ramprate)	
+	i = 0
 	do
 		rampmultiplebd(bd, channelsy, starty+i*((finy-starty)/(numptsy-1)), ramprate=1000)
 
 		if (setchargesensor == 1)
-			rampfd(fd, channelsx, round((startx+finx)/2), ramprate=ramprate)
-			setchargesensorfd(fd, bd)
-
+			rampOutputfdac(fd, str2num(channelsx), round((startx+finx)/2), ramprate=ramprate)
+			//setchargesensorfd(fd, bd)
+			//TODO: Put this back in!
+			rampOutputfdac(fd, str2num(channelsx), startx, ramprate=ramprate)	
 		endif
+		
 		sc_sleep(delayy)
-		rt = FD1D(fd, channelsx, startx, finx, numptsx, delay, ADCchannels=ADCchannels, ramprate=ramprate, delayy=delayy)
-		if (printramptimes == 1)
-			printf "%.1f, ", rt
-		endif
-
-		switch (strlen(ADCchannels))
-			case 1:
-				FastScan_2d[][i] = FastScan[p]
-				break
-			case 2:
-				FastScanCh0[] = FastScan[2*p]
-				FastScanCh1[] = FastScan[2*p+1]
-				FastScanCh0_2d[][i] = FastScan[2*p]
-				FastScanCh1_2d[][i] = FastScan[2*p+1]
-				break
-			case 4:
-				FastScanCh0[] = FastScan[4*p]
-				FastScanCh1[] = FastScan[4*p+1]
-				FastScanCh0_2d[][i] = FastScan[4*p]
-				FastScanCh1_2d[][i] = FastScan[4*p+1]
-				FastScanCh2[] = FastScan[4*p+2]
-				FastScanCh3[] = FastScan[4*p+3]
-				FastScanCh2_2d[][i] = FastScan[4*p+2]
-				FastScanCh3_2d[][i] = FastScan[4*p+3]
-				break
-			default:
-				abort "Not implemented yet"
-		endswitch
-
-		doupdate
-		i += 1
+		fdacRecordValues(fd, i, channelsx, num2str(startx), num2str(finx), numptsx, RCcutoff=RCcutoff, numAverage=numAverage, notch=notch)
 	while (i<numptsy)
-	if (printramptimes==1)
-		printf "\r"
-	endif
-	savewavesFast(ADCchannels)
-end
-
-function ScanFastDac2DSRS(bd, fd, srs, startx, finx, channelsx, numptsx, starty, finy, numptsy, [delayy, delayx, ramprate, ADCchannels, xlabel, setchargesensor, printramptimes]) // Use either numpts or maxramprate to determine numpts whichever constrains more
-	variable bd, fd, srs, startx, finx, numptsx, starty, finy, numptsy, delayy, delayx, ramprate, setchargesensor, printramptimes
-	string channelsx, ADCchannels, xlabel
-
-	variable/g sc_scanstarttime = datetime
-
-
-	ramprate = paramisdefault(ramprate) ? 5000 : ramprate
-	delayx = paramisdefault(delayx) ? 1e-6 : delayx //about 1e-3 is where it starts to slow down
-
-
-	if (paramisdefault(ADCchannels))
-		ADCchannels = "0"
-	endif
-
-	string/g sc_y_label, sc_x_label
-	if (!paramisdefault(xlabel))
-		sc_x_label = xlabel
-	else
-		sc_x_label = "FD not named"
-	endif
-	sc_y_label = "SRS Amplitude/mV"
-
-	InitializeFastScan2D(startx, finx, numptsx, starty, finy, numptsy, ADCchannels)
-	wave FastScan_2d, FastScanCh0, FastScanCh1, FastScanCh0_2d, FastscanCh1_2d, FastScanCh2, FastScanCh3, FastScanCh2_2d, FastscanCh3_2d
-
-	if (printramptimes==1)
-		printf "Ramp times in s are: "
-	endif
-
-	variable i, delay = delayx, rt
-	wave FastScan
-	setsrsamplitude(srs, starty)
-		i = 0
-	do
-		setsrsamplitude(srs, starty+i*((finy-starty)/(numptsy-1)))
-
-		sc_sleep(delayy)
-		rt = FD1D(fd, channelsx, startx, finx, numptsx, delay, ADCchannels=ADCchannels, ramprate=ramprate, delayy=delayy)
-		if (printramptimes == 1)
-			printf "%.1f, ", rt
-		endif
-
-		switch (strlen(ADCchannels))
-			case 1:
-				FastScan_2d[][i] = FastScan[p]
-				break
-			case 2:
-				FastScanCh0[] = FastScan[2*p]
-				FastScanCh1[] = FastScan[2*p+1]
-				FastScanCh0_2d[][i] = FastScan[2*p]
-				FastScanCh1_2d[][i] = FastScan[2*p+1]
-				break
-			case 4:
-				FastScanCh0[] = FastScan[4*p]
-				FastScanCh1[] = FastScan[4*p+1]
-				FastScanCh0_2d[][i] = FastScan[4*p]
-				FastScanCh1_2d[][i] = FastScan[4*p+1]
-				FastScanCh2[] = FastScan[4*p+2]
-				FastScanCh3[] = FastScan[4*p+3]
-				FastScanCh2_2d[][i] = FastScan[4*p+2]
-				FastScanCh3_2d[][i] = FastScan[4*p+3]
-				break
-			default:
-				abort "Not implemented yet"
-		endswitch
-
-		doupdate
-		i += 1
-	while (i<numptsy)
-	if (printramptimes==1)
-		printf "\r"
-	endif
-	savewavesFast(ADCchannels)
+	SaveWaves(msg=comments, fastdac=1)
 end
 
 
-function ScanFastDac2DMAG(bd, fd, mag, startx, finx, channelsx, numptsx, starty, finy, numptsy, [delayy, delayx, ramprate, ADCchannels, xlabel, setchargesensor, printramptimes]) // Use either numpts or maxramprate to determine numpts whichever constrains more
-	variable bd, fd, mag, startx, finx, numptsx, starty, finy, numptsy, delayy, delayx, ramprate, setchargesensor, printramptimes
-	string channelsx, ADCchannels, xlabel
-
-	variable/g sc_scanstarttime = datetime
-
-
-	ramprate = paramisdefault(ramprate) ? 5000 : ramprate
-	delayx = paramisdefault(delayx) ? 1e-6 : delayx //about 1e-3 is where it starts to slow down
-
-
-	if (paramisdefault(ADCchannels))
-		ADCchannels = "0"
-	endif
-
-	string/g sc_y_label, sc_x_label
-	if (!paramisdefault(xlabel))
-		sc_x_label = xlabel
-	else
-		sc_x_label = "FD not named"
-	endif
-	sc_y_label = "Mag Field/mT"
-
-	InitializeFastScan2D(startx, finx, numptsx, starty, finy, numptsy, ADCchannels)
-	wave FastScan_2d, FastScanCh0, FastScanCh1, FastScanCh0_2d, FastscanCh1_2d, FastScanCh2, FastScanCh3, FastScanCh2_2d, FastscanCh3_2d
-
-	if (printramptimes==1)
-		printf "Ramp times in s are: "
-	endif
-
-	variable i, delay = delayx, rt
-	wave FastScan
-	setls625fieldwait(mag, starty)
-	timsleep(60)
-	i = 0
-	do
-		setls625fieldwait(mag, starty+i*((finy-starty)/(numptsy-1)))
-		//Delayy is in FD1D
-		rt = FD1D(fd, channelsx, startx, finx, numptsx, delay, ADCchannels=ADCchannels, ramprate=ramprate, delayy=delayy)
-		if (printramptimes == 1)
-			printf "%.1f, ", rt
-		endif
-
-		switch (strlen(ADCchannels))
-			case 1:
-				FastScan_2d[][i] = FastScan[p]
-				break
-			case 2:
-				FastScanCh0[] = FastScan[2*p]
-				FastScanCh1[] = FastScan[2*p+1]
-				FastScanCh0_2d[][i] = FastScan[2*p]
-				FastScanCh1_2d[][i] = FastScan[2*p+1]
-				break
-			case 4:
-				FastScanCh0[] = FastScan[4*p]
-				FastScanCh1[] = FastScan[4*p+1]
-				FastScanCh0_2d[][i] = FastScan[4*p]
-				FastScanCh1_2d[][i] = FastScan[4*p+1]
-				FastScanCh2[] = FastScan[4*p+2]
-				FastScanCh3[] = FastScan[4*p+3]
-				FastScanCh2_2d[][i] = FastScan[4*p+2]
-				FastScanCh3_2d[][i] = FastScan[4*p+3]
-				break
-			default:
-				abort "Not implemented yet"
-		endswitch
-
-		doupdate
-		i += 1
-	while (i<numptsy)
-	if (printramptimes==1)
-		printf "\r"
-	endif
-	savewavesFast(ADCchannels)
-end
-
-
-
-function ScanFastDac2DLine(bd, fd, startx, finx, channelsx, numptsx, x_label, starty, finy, channelsy, numptsy, delayy, rampratey, width, [ADCchannels, delayx, rampratex, x1, y1, x2, y2, linecut, followtolerance, startrange])//Units: mV
-	variable bd, fd, startx, finx, numptsx, starty
-	variable finy, numptsy, delayy, rampratey, delayx, rampratex, x1, y1, x2, y2, width, linecut
-	variable followtolerance, startrange
-	//startrange = how many mV to look from end of scan range in x for first transition
-	// findthreshold = tolerance in findtransition (~1 is high (not very reliable), 5 is low (very reliable))
-	string ADCchannels, channelsx, x_label, channelsy
-	variable i=0, j=0, setpointx, setpointy, ft = followtolerance, threshold
-	string y_label = getlabel(channelsy)
-
-	svar VKS = $getVKS()  //Global VariableKeyString so it can be passed and altered by the function (e.g. Cut2Dlines)
-	VKS = ""  // Reset global string
-
-//	if((finx - startx)/(stepmultiple*0.076) < 20) //Easy to forget that it is stepmultiple instead of numptsx
-//		doAlert/T="Check stepmultiple (not numptsx here!)" 1, "Do you really want to run a scan with only "\
-//			+ num2istr((finx - startx)/(stepmultiple*0.076)) + " points per line? Remember stepmultiple is a multiple of minimum DAC step (0.076mV)"
-//		if(V_flag == 2)
-//			abort "Good choice"
-//		endif
-//	endif
-//	numptsx = round(abs((finx-startx)/(stepmultiple*0.076)))
-
-	startrange = paramIsDefault(startrange) ? 150 : startrange
-	//startattop = paramisdefault(startattop) ? 1 : startattop //Defaults to starting at top of transition
-	delayx = paramisdefault(delayx) ? 1e-6 : delayx //Max speed by default
-	rampratex = paramisdefault(rampratex) ? 5000 : rampratex //Max speed by default
-	if (paramisdefault(ADCchannels))
-		ADCchannels = "0"
-	endif
-	if (startx >= finx)
-		abort "Please make start x less than fin x"
-	endif
-
-
-	if(paramisdefault(x1) || paramisdefault(x2) || paramisdefault(y1) || paramisdefault(y2))
-		variable sy, numx
-		wave FastScan //uses charge transition to find positions and gradient
-		print "Scanning two lines to calculate initial gradient and transition coords"
-		numx = round(abs(startx-finx) < 100 ? 100 : abs(startx - finx)) //numx is larger of 100points or every 1mV
-//		if (startattop == 1)
-//			sy = starty < finy ? finy : starty //sets sy to higher of starty/finy to scan from top down
-		if (starty > finy) //If starting from top of scan
-//			sy = starty
-			rampfd(fd, channelsx, startx)
-			rampmultiplebd(bd, channelsy, starty)
-			sc_sleep(0.1)
-			setchargesensorfd(fd, bd)  //Uses default SetChargeSensor setting
-			FD1D(fd, channelsx, startx, startx+startrange, startrange*4, delayx, ramprate=rampratex, ADCchannels="0") //Hard coded to use FD0 as Charge sensor //Leaves scan in FastScan
-		else //Starting from bottom
-			rampfd(fd, channelsx, finx-startrange)
-			rampmultiplebd(bd, channelsy, starty)
-			sc_sleep(0.1)
-			setchargesensorfd(fd, bd)  //Uses default SetChargeSensor setting
-			FD1D(fd, channelsx, finx-startrange, finx, startrange*4, delayx, ramprate=rampratex, ADCchannels="0") //Hard coded to use FD0 as Charge sensor //Leaves scan in FastScan		endif
-		endif
-
-		x1 = findtransitionmid(FastScan, threshold=threshold)
-		if(numtype(x1) == 2) //if didn't find it there, try other part
-			doAlert/T="Didn't find transition" 1, "Do you want to see the rest of the scan region?"
-			if(V_flag == 2) //No clicked
-				abort "Didn't want to look in rest of range"
-			endif
-			FD1D(fd, channelsx, startx, finx, 1001, delayx, ramprate=rampratex, ADCchannels="0") //Hard coded to use FD0 as Charge sensor //Leaves scan in FastScan		endif
-			Killwindow/z FastScan0  //Attempt to not clutter, but not sure if it will have this name each time.
-			Display/N=FastScan Fastscan
-			abort "Restart Scan with new parameters"
-		endif
-
-//		y1 = sy
-		y1 = starty
-		rampmultiplebd(bd, channelsy, starty+5, ramprate = 1000)
-		FD1D(fd, "0", x1-startrange/2, x1+startrange/4, startrange*3, delayx, ADCchannels="0") //only checks near to previous transition
-		x2 = findtransitionmid(FastScan, threshold=threshold)
-		if(numtype(x2) == 2)
-			abort "failed to find charge transition at first row +5mV"
-		endif
-		y2 = starty+5
-		print "x1 = " + num2str(x1) + ", " + "y1 = " + num2str(y1) + ", " + "x2 = " + num2str(x2) + ", " + "y2 = " + num2str(y2) //useful if you want to run the same scan multiple times
-	endif
-
-	VKS = replacenumberbykey("x1", VKS, x1)
-	VKS = replacenumberbykey("x2", VKS, x2)
-	VKS = replacenumberbykey("y1", VKS, y1)
-	VKS = replacenumberbykey("y2", VKS, y2)
-	VKS = replacenumberbykey("w", VKS, width)
-
-	string/g sc_y_label
-	sc_y_label = getlabel(channelsy)
-
-
-	InitializeFastScan2D(0, width, numptsx, starty, finy, numptsy, ADCchannels)
-	make/o/n=(ceil(abs(finx-startx)/width*numptsx), numptsy) FullScan //For displaying the full scan, but not saved
-	setscale /i x, startx, finx, FullScan
-	setscale /i y, starty, finy, FullScan
-
-	if (linecut == 1)
-		variable/g sc_is2d = 2
-		make/o/n=(numptsy) sc_linestart
-		setscale /i x, starty, finy, sc_linestart
-	endif
-	VKS = replacenumberbykey("x1", VKS, x1)
-	VKS = replacenumberbykey("x2", VKS, x2)
-	VKS = replacenumberbykey("y1", VKS, y1)
-	VKS = replacenumberbykey("y2", VKS, y2)
-	VKS = replacenumberbykey("w", VKS, width)
-	//VKS = replacenumberbykey("n", VKS, 0) 		//used by Cut2Dline for adapting line
-
-
-  	// main loop
-  	variable/g sc_scanstarttime = datetime
-  	variable sx, fx
-  	wave FastScan, FastScan_2d, FastScanCh0, FastScanCh1, FastScanCh0_2d, FastscanCh1_2d, FastScanCh2, FastScanCh3, FastScanCh2_2d, FastscanCh3_2d
-	do
-		setpointy = starty + (i*(finy-starty)/(numptsy-1))
-		Cut2Dline(startx = sx, finx = fx, y = setpointy, followtolerance=followtolerance) //Returns startx and finx of scan line in sx and fx
-		sc_linestart[i] = sx
-//		sx = sx < startx ? startx : sx
-//		fx = fx > finx ? finx : fx
+//function ScanFastDac2DLine(bd, fd, startx, finx, channelsx, numptsx, x_label, starty, finy, channelsy, numptsy, delayy, width, [comments, rampratex, rampratey, x1, y1, x2, y2, linecut, followtolerance, startrange])//Units: mV
+//	variable bd, fd, startx, finx, numptsx, starty
+//	variable finy, numptsy, delayy, rampratey, rampratex, x1, y1, x2, y2, width, linecut
+//	variable followtolerance, startrange
+//	//startrange = how many mV to look from end of scan range in x for first transition
+//	// findthreshold = tolerance in findtransition (~1 is high (not very reliable), 5 is low (very reliable))
+//	string channelsx, x_label, channelsy, comments
+//	variable i=0, j=0, setpointx, setpointy, ft = followtolerance, threshold
+//	string y_label = getlabel(channelsy)
 //
-	  	RampMultipleBD(bd, channelsy, setpointy, ramprate=rampratey)
-		rampfd(fd, channelsx, sx)
-		sc_sleep(delayy)
-		setchargesensorfd(fd, bd)
-
-		FD1D(fd, channelsx, sx, fx, numptsx, delayx, ADCchannels=ADCchannels, ramprate=rampratex, delayy=delayy)  //Creates 1D wave called 'FastScan1D'
-		//joshsweep(fd,0,0,1,1001,1e-6)
-
-		switch (strlen(ADCchannels))
-			case 1:
-				FastScan_2d[][i] = FastScan[p]
-				break
-			case 2:
-				FastScanCh0[] = FastScan[2*p]
-				FastScanCh1[] = FastScan[2*p+1]
-				FastScanCh0_2d[][i] = FastScan[2*p]
-				FastScanCh1_2d[][i] = FastScan[2*p+1]
-				break
-			case 4:
-				FastScanCh0[] = FastScan[4*p]
-				FastScanCh1[] = FastScan[4*p+1]
-				FastScanCh0_2d[][i] = FastScan[4*p]
-				FastScanCh1_2d[][i] = FastScan[4*p+1]
-				FastScanCh2[] = FastScan[4*p+2]
-				FastScanCh3[] = FastScan[4*p+3]
-				FastScanCh2_2d[][i] = FastScan[4*p+2]
-				FastScanCh3_2d[][i] = FastScan[4*p+3]
-				break
-			default:
-				abort "Not implemented yet"
-		endswitch
-
-		// TODO: Make FullScan update... hard to figure out where to put in values into matrix??
-
-		doupdate
-
-		// tell cutfunc another line is completed
-		i+=1
-		VKS = ReplaceNumberByKey("n", VKS, i) //Tells cut func which row has finished being scanned
-	while (i<numptsy)
-
-  Savewavesfast(ADCchannels)
-end
-
+//	svar VKS = $getVKS()  //Global VariableKeyString so it can be passed and altered by the function (e.g. Cut2Dlines)
+//	VKS = ""  // Reset global string
+//
+//	startrange = paramIsDefault(startrange) ? 150 : startrange
+//	rampratex = paramisdefault(rampratex) ? 5000 : rampratex //Max speed by default
+//	if (startx >= finx)
+//		abort "Please make start x less than fin x"
+//	endif
+//
+//
+//	if(paramisdefault(x1) || paramisdefault(x2) || paramisdefault(y1) || paramisdefault(y2))
+//		variable sy, numx
+//		wave FastScan //uses charge transition to find positions and gradient
+//		print "Scanning two lines to calculate initial gradient and transition coords"
+//		numx = round(abs(startx-finx) < 100 ? 100 : abs(startx - finx)) //numx is larger of 100points or every 1mV
+////		if (startattop == 1)
+////			sy = starty < finy ? finy : starty //sets sy to higher of starty/finy to scan from top down
+//		if (starty > finy) //If starting from top of scan
+////			sy = starty
+//			rampfd(fd, channelsx, startx)
+//			rampmultiplebd(bd, channelsy, starty)
+//			sc_sleep(0.1)
+//			setchargesensorfd(fd, bd)  //Uses default SetChargeSensor setting
+//			FD1D(fd, channelsx, startx, startx+startrange, startrange*4, delayx, ramprate=rampratex, ADCchannels="0") //Hard coded to use FD0 as Charge sensor //Leaves scan in FastScan
+//		else //Starting from bottom
+//			rampfd(fd, channelsx, finx-startrange)
+//			rampmultiplebd(bd, channelsy, starty)
+//			sc_sleep(0.1)
+//			setchargesensorfd(fd, bd)  //Uses default SetChargeSensor setting
+//			FD1D(fd, channelsx, finx-startrange, finx, startrange*4, delayx, ramprate=rampratex, ADCchannels="0") //Hard coded to use FD0 as Charge sensor //Leaves scan in FastScan		endif
+//		endif
+//
+//		x1 = findtransitionmid(FastScan, threshold=threshold)
+//		if(numtype(x1) == 2) //if didn't find it there, try other part
+//			doAlert/T="Didn't find transition" 1, "Do you want to see the rest of the scan region?"
+//			if(V_flag == 2) //No clicked
+//				abort "Didn't want to look in rest of range"
+//			endif
+//			FD1D(fd, channelsx, startx, finx, 1001, delayx, ramprate=rampratex, ADCchannels="0") //Hard coded to use FD0 as Charge sensor //Leaves scan in FastScan		endif
+//			Killwindow/z FastScan0  //Attempt to not clutter, but not sure if it will have this name each time.
+//			Display/N=FastScan Fastscan
+//			abort "Restart Scan with new parameters"
+//		endif
+//
+////		y1 = sy
+//		y1 = starty
+//		rampmultiplebd(bd, channelsy, starty+5, ramprate = 1000)
+//		FD1D(fd, "0", x1-startrange/2, x1+startrange/4, startrange*3, delayx, ADCchannels="0") //only checks near to previous transition
+//		x2 = findtransitionmid(FastScan, threshold=threshold)
+//		if(numtype(x2) == 2)
+//			abort "failed to find charge transition at first row +5mV"
+//		endif
+//		y2 = starty+5
+//		print "x1 = " + num2str(x1) + ", " + "y1 = " + num2str(y1) + ", " + "x2 = " + num2str(x2) + ", " + "y2 = " + num2str(y2) //useful if you want to run the same scan multiple times
+//	endif
+//
+//	VKS = replacenumberbykey("x1", VKS, x1)
+//	VKS = replacenumberbykey("x2", VKS, x2)
+//	VKS = replacenumberbykey("y1", VKS, y1)
+//	VKS = replacenumberbykey("y2", VKS, y2)
+//	VKS = replacenumberbykey("w", VKS, width)
+//
+//	string/g sc_y_label
+//	sc_y_label = getlabel(channelsy)
+//
+//
+//	InitializeFastScan2D(0, width, numptsx, starty, finy, numptsy, ADCchannels)
+//	make/o/n=(ceil(abs(finx-startx)/width*numptsx), numptsy) FullScan //For displaying the full scan, but not saved
+//	setscale /i x, startx, finx, FullScan
+//	setscale /i y, starty, finy, FullScan
+//
+//	if (linecut == 1)
+//		variable/g sc_is2d = 2
+//		make/o/n=(numptsy) sc_linestart
+//		setscale /i x, starty, finy, sc_linestart
+//	endif
+//	VKS = replacenumberbykey("x1", VKS, x1)
+//	VKS = replacenumberbykey("x2", VKS, x2)
+//	VKS = replacenumberbykey("y1", VKS, y1)
+//	VKS = replacenumberbykey("y2", VKS, y2)
+//	VKS = replacenumberbykey("w", VKS, width)
+//	//VKS = replacenumberbykey("n", VKS, 0) 		//used by Cut2Dline for adapting line
+//
+//
+//  	// main loop
+//  	variable/g sc_scanstarttime = datetime
+//  	variable sx, fx
+//  	wave FastScan, FastScan_2d, FastScanCh0, FastScanCh1, FastScanCh0_2d, FastscanCh1_2d, FastScanCh2, FastScanCh3, FastScanCh2_2d, FastscanCh3_2d
+//	do
+//		setpointy = starty + (i*(finy-starty)/(numptsy-1))
+//		Cut2Dline(startx = sx, finx = fx, y = setpointy, followtolerance=followtolerance) //Returns startx and finx of scan line in sx and fx
+//		sc_linestart[i] = sx
+////		sx = sx < startx ? startx : sx
+////		fx = fx > finx ? finx : fx
+////
+//	  	RampMultipleBD(bd, channelsy, setpointy, ramprate=rampratey)
+//		rampfd(fd, channelsx, sx)
+//		sc_sleep(delayy)
+//		setchargesensorfd(fd, bd)
+//
+//		FD1D(fd, channelsx, sx, fx, numptsx, delayx, ADCchannels=ADCchannels, ramprate=rampratex, delayy=delayy)  //Creates 1D wave called 'FastScan1D'
+//		//joshsweep(fd,0,0,1,1001,1e-6)
+//
+//		switch (strlen(ADCchannels))
+//			case 1:
+//				FastScan_2d[][i] = FastScan[p]
+//				break
+//			case 2:
+//				FastScanCh0[] = FastScan[2*p]
+//				FastScanCh1[] = FastScan[2*p+1]
+//				FastScanCh0_2d[][i] = FastScan[2*p]
+//				FastScanCh1_2d[][i] = FastScan[2*p+1]
+//				break
+//			case 4:
+//				FastScanCh0[] = FastScan[4*p]
+//				FastScanCh1[] = FastScan[4*p+1]
+//				FastScanCh0_2d[][i] = FastScan[4*p]
+//				FastScanCh1_2d[][i] = FastScan[4*p+1]
+//				FastScanCh2[] = FastScan[4*p+2]
+//				FastScanCh3[] = FastScan[4*p+3]
+//				FastScanCh2_2d[][i] = FastScan[4*p+2]
+//				FastScanCh3_2d[][i] = FastScan[4*p+3]
+//				break
+//			default:
+//				abort "Not implemented yet"
+//		endswitch
+//
+//		// TODO: Make FullScan update... hard to figure out where to put in values into matrix??
+//
+//		doupdate
+//
+//		// tell cutfunc another line is completed
+//		i+=1
+//		VKS = ReplaceNumberByKey("n", VKS, i) //Tells cut func which row has finished being scanned
+//	while (i<numptsy)
+//
+//  Savewavesfast(ADCchannels)
+//end
 
 
 
@@ -1030,306 +858,6 @@ function killgraphs()
 	sc_controlwindows("") // Kill all open control windows
 end
 
-function OpenPlotsFast(ADCchannels)
-	string ADCchannels
-	string graphlist, graphname, plottitle, graphtitle="", graphnumlist="", graphnum, activegraphs="", cmd1="",cmd2="",window_string=""
-	variable index, graphopen=0, graphopen2d
-	svar sc_x_label, sc_y_label, sc_colormap
-
-
-	switch (strlen(ADCchannels))
-		case 1:
-			make/o/t wnlist = {"FastScan"}
-			break
-		case 2:
-			make/o/t wnlist = {"FastScanCh0", "FastScanCh1"}
-			break
-		case 4:
-			make/o/t wnlist = {"FastScanCh0","FastScanCh1", "FastScanCh2", "FastScanCh3"}
-			break
-		default:
-			abort "Not made for this yet"  // TODO: Make this work for any combination, maybe use strlen and read out each number individually to create wave names?
-	endswitch
-
-
-	string  wn, wn2d
-	variable i, j, k
-	nvar filenum
-
-	k=0
-	do
-		graphopen = 0
-		graphopen2d = 0
-		wn = wnlist[k]
-		wn2d = wnlist[k]+"_2D"
-
-		// Find all open plots
-		graphlist = winlist("*",";","WIN:1")
-		j=0
-		for (i=0;i<itemsinlist(graphlist);i=i+1)
-			index = strsearch(graphlist,";",j)
-			graphname = graphlist[j,index-1]
-			setaxis/w=$graphname /a
-			getwindow $graphname wtitle
-			splitstring /e="(.*):(.*)" s_value, graphnum, plottitle
-			graphtitle+= plottitle+";"
-			graphnumlist+= graphnum+";"
-			j=index+1
-		endfor
-
-		// Check if plots are already open for new waves
-		for (j=0;j<itemsinlist(graphtitle); j++)
-			if(stringmatch(wn,stringfromlist(j,graphtitle)))
-				graphopen = 1
-				activegraphs+= stringfromlist(j,graphnumlist)+";"
-				Label /W=$stringfromlist(j,graphnumlist) bottom,  sc_x_label  //TODO: Set labels better
-				TextBox/W=$stringfromlist(j,graphnumlist)/C/N=datnum/A=LT/X=1.00/Y=1.00/E=2 "Dat="+num2str(filenum)
-			endif
-			if(stringmatch(wn2d,stringfromlist(j,graphtitle)))
-				graphopen2d = 1
-				activegraphs+= stringfromlist(j,graphnumlist)+";"
-				Label /W=$stringfromlist(j,graphnumlist) bottom,  sc_x_label  //TODO: Set labels better
-				Label /W=$stringfromlist(j,graphnumlist) left, sc_y_label
-				TextBox/W=$stringfromlist(j,graphnumlist)/C/N=datnum/A=LT/X=1.00/Y=1.00/E=2 "Dat="+num2str(filenum)
-			endif
-		endfor
-
-		if (graphopen2d==0)
-			display
-			setwindow kwTopWin, enablehiresdraw=3
-			appendimage $wn2d
-			modifyimage $wn2d ctab={*, *, $sc_ColorMap, 0}
-			colorscale /c/n=$sc_ColorMap /e/a=rc
-			Label left, sc_y_label
-			Label bottom, sc_x_label
-			TextBox/C/N=datnum/A=LT/X=1.00/Y=1.00/E=2 "Dat="+num2str(filenum)
-			activegraphs+= winname(0,1)+";"
-		endif
-		if (graphopen==0)
-			display $wn
-			setwindow kwTopWin, enablehiresdraw=3
-			Label bottom, sc_x_label
-			TextBox/C/N=datnum/A=LT/X=1.00/Y=1.00/E=2 "Dat="+num2str(filenum)
-			activegraphs+= winname(0,1)+";"
-		endif
-		k+=1
-	while (k<numpnts(wnlist))
-
-	execute("abortmeasurementwindow()")
-	cmd1 = "TileWindows/O=1/A=(3,4) "
-	cmd2 = ""
-	// Tile graphs
-	for(i=0;i<itemsinlist(activegraphs);i=i+1)
-		window_string = stringfromlist(i,activegraphs)
-		cmd1+= window_string +","
-		cmd2 = "DoWindow/F " + window_string
-		execute(cmd2)
-	endfor
-	cmd1 += "SweepControl"
-	execute(cmd1)
-end
-
-
-
-function SaveWavesFast(ADCchannels[msg, save_experiment])
-	// the message will be printed in the history, and will be saved in the HDF file corresponding to this scan
-	// save_experiment=1 to save the experiment file
-	string ADCchannels
-	string msg
-	variable save_experiment
-	nvar sc_PrintRaw, sc_PrintCalc, sc_scanstarttime
-	svar sc_x_label, sc_y_label
-	string filename, wn, logs=""
-	nvar sc_is2d, filenum
-	string filenumstr = ""
-	sprintf filenumstr, "%d", filenum
-	wave /t sc_RawWaveNames, sc_CalcWaveNames
-	wave sc_RawRecord, sc_CalcRecord
-
-	dowindow/k sweepcontrol
-
-	if (!paramisdefault(msg))
-		print msg
-	else
-		msg=""
-	endif
-
-	nvar sc_save_time
-	if (paramisdefault(save_experiment))
-		save_experiment = 1 // save the experiment by default
-	endif
-
-	KillDataFolder /Z root:async // clean this up for next time
-
-	// save timing variables
-	variable /g sweep_t_elapsed = datetime-sc_scanstarttime
-	printf "Time elapsed: %.2f s \r", sweep_t_elapsed
-
-	dowindow /k SweepControl // kill scan control window
-
-	// count up the number of data files to save
-	variable ii=0
-	variable Rawadd = sum(sc_RawRecord)
-	variable Calcadd = sum(sc_CalcRecord)
-
-	//if(Rawadd+Calcadd > 0)
-		// there is data to save!
-		// save it and increment the filenumber
-		printf "saving all dat%d files...\r", filenum
-
-		nvar sc_rvt
-	   	if(sc_rvt==1)
-	   		sc_update_xdata() // update xdata wave
-		endif
-
-		// Open up HDF5 files
-	 	// Save scan controller meta data in this function as well
-		initSaveFiles(msg=msg)
-
-		// TODO: Make correct sc_xdata and sc_ydata for initSaveFiles to save
-
-
-		if(sc_is2d == 2) //If 2D linecut then need to save starting x values for each row of data
-			wave sc_linestart
-			filename = "dat" + filenumstr + "linestart"
-			duplicate sc_linestart $filename
-			savesinglewave("sc_linestart")
-		endif
-		// save raw data waves
-//		ii=0
-//		do
-//			if (sc_RawRecord[ii] == 1)
-//				wn = sc_RawWaveNames[ii]
-//				if (sc_is2d)
-//					wn += "2d"
-//				endif
-//				filename =  "dat" + filenumstr + wn
-//				duplicate $wn $filename // filename is a new wavename and will become <filename.xxx>
-//				if(sc_PrintRaw == 1)
-//					print filename
-//				endif
-//				saveSingleWave(wn)
-//			endif
-//			ii+=1
-//		while (ii < numpnts(sc_RawWaveNames))
-
-		//save calculated data waves
-//		ii=0
-//		do
-//			if (sc_CalcRecord[ii] == 1)
-//				wn = sc_CalcWaveNames[ii]
-//				if (sc_is2d)
-//					wn += "2d"
-//				endif
-//				filename =  "dat" + filenumstr + wn
-//				duplicate $wn $filename
-//				if(sc_PrintCalc == 1)
-//					print filename
-//				endif
-//				saveSingleWave(wn)
-//			endif
-//			ii+=1
-//		while (ii < numpnts(sc_CalcWaveNames))
-
-
-
-		switch (strlen(ADCchannels)) //TODO: make this work properly, fudged at the moment
-			case 1:
-				make/o/t wnlist = {"FastScan"}
-				break
-			case 2:
-				make/o/t wnlist = {"FastScanCh0", "FastScanCh1"}
-				break
-			case 4:
-				make/o/t wnlist = {"FastScanCh0", "FastScanCh1", "FastScanCh2", "FastScanCh3"}
-				break
-			default:
-				abort "Waves not saved, not sure what ADCchannels were used"
-		endswitch
-
-
-
-		variable i=0
-		do
-			wn = wnlist[i]
-			filename =  "dat" + filenumstr + wn
-			duplicate $wn $filename
-			saveSingleWave(wn)
-			wn = wn + "_2d"
-			filename =  "dat" + filenumstr + wn
-			duplicate $wn $filename
-			saveSingleWave(wn)
-			i+=1
-		while(i<numpnts(wnlist))
-
-		closeSaveFiles()
-	//endif
-
-	if(save_experiment==1 & (datetime-sc_save_time)>180.0)
-		// save if sc_save_exp=1
-		// and if more than 3 minutes has elapsed since previous saveExp
-		// if the sweep was aborted sc_save_exp=0 before you get here
-		saveExp()
-		sc_save_time = datetime
-	endif
-
-	// check if a path is defined to backup data
-	if(sc_checkBackup())
-		// copy data to server mount point
-		sc_copyNewFiles(filenum, save_experiment=save_experiment )
-	endif
-
-	// increment filenum
-//	if(Rawadd+Calcadd > 0)
-//		filenum+=1
-//	endif
-
-	filenum+=1
-end
-
-
-
-function makecolorful([rev, nlines])
-	variable rev, nlines
-	variable num=0, index=0,colorindex
-	string tracename
-	string list=tracenamelist("",";",1)
-	colortab2wave rainbow
-	wave M_colors
-	variable n=dimsize(M_colors,0), group
-	do
-		tracename=stringfromlist(index, list)
-		if(strlen(tracename)==0)
-			break
-		endif
-		index+=1
-	while(1)
-	num=index-1
-	if( !ParamIsDefault(nlines))
-		group=index/nlines
-	endif
-	index=0
-	do
-		tracename=stringfromlist(index, list)
-		if( ParamIsDefault(nlines))
-			if( ParamIsDefault(rev))
-				colorindex=round(n*index/num)
-			else
-				colorindex=round(n*(num-index)/num)
-			endif
-		else
-			if( ParamIsDefault(rev))
-				colorindex=round(n*ceil((index+1)/nlines)/group)
-			else
-				colorindex=round(n*(group-ceil((index+1)/nlines))/group)
-			endif
-		endif
-		ModifyGraph rgb($tracename)=(M_colors[colorindex][0],M_colors[colorindex][1],M_colors[colorindex][2])
-		index+=1
-	while(index<=num)
-
-end
-
 function NikDiff(yname, xname, idxStr)
 	// yname is the name of the y-array
 	// xname is the name of the x-array
@@ -1416,51 +944,6 @@ function Display3VarScans(wavenamestr, [v1, v2, v3, uselabels, usecolorbar, diff
 				v1step = -50; v2step = -50; v3step = -25
 				make/o/t varlabels = {"CSR", "CStotal", "ACG"}
 				make/o/t axislabels = {"SDL", "SDR"} //y, x
-				break
-			case 2:
-				// Also something to do with setting up small dot, see notebook.
-				datstart = 766
-				v1gmax = 3; v2gmax = 4; v3gmax = 2 //Have to make global to use NumVarOrDefault...
-				v1start = -300; v2start = -700; v3start = 0
-				v1step = -25; v2step = -100; v3step = -50
-				make/o/t varlabels = {"CSR", "SDP", "ACG"}
-				make/o/t axislabels = {"SDL", "SDR"} //y, x
-				break
-			case 3:
-				// Same again, see notebook
-				datstart = 852
-				v1gmax = 3; v2gmax = 5; v3gmax = 3 //Have to make global to use NumVarOrDefault...
-				v1start = 0; v2start = 0; v3start = 0
-				v1step = 0; v2step = 0; v3step = 0
-				make/o/t varlabels = {"CSR", "SDP", "ACG"}
-				make/o/t axislabels = {"SDL", "SDR"} //y, x
-				break
-			case 4:
-				// DCbias scans through HQPC on right side varying HQPC resistance, mag field, and position on transition 0-1
-				datstart = 1939
-				v1gmax = 6; v2gmax = 6; v3gmax = 3 //Have to make global to use NumVarOrDefault...
-				v1start = -960; v2start = 0; v3start = -470
-				v1step = -10; v2step = +20; v3step = +20
-				make/o/t varlabels = {"HQPC", "Y field", "SDR"}
-				make/o/t axislabels = {"Bias/10nA", "FD_SDP/50mV"} //y, x
-				break
-			case 5:
-				// Entropy repeats using HQPC on right side varying HQPC resistance, Frequency, and position on transition 0-1
-				datstart = 2047
-				v1gmax = 6; v2gmax = 3; v3gmax = 3 //Have to make global to use NumVarOrDefault...
-				v1start = -960; v2start = 111; v3start = -470
-				v1step = -10; v2step = +200; v3step = +20
-				make/o/t varlabels = {"HQPC", "Freq/Hz", "SDR"}
-				make/o/t axislabels = {"Repeats", "FD_SDP/50mV"} //y, x
-				break
-			case 6:
-				// Entropy frequency dependene repeats using HQPC on right side varying HQPC resistance, and transitions 0 -> 3
-				datstart = 2108
-				v1gmax = 6; v2gmax = 2; v3gmax = 3 //Have to make global to use NumVarOrDefault...
-				v1start = 50; v2start = -980; v3start = 0
-				v1step = 60; v2step = -20; v3step = 1
-				make/o/t varlabels = {"~Freq/Hz", "HQPC", "Transition"}
-				make/o/t axislabels = {"Repeats", "FD_SDP/50mV"} //y, x
 				break
 		endswitch
 	endif
@@ -2130,15 +1613,6 @@ function SetupStandardEntropy([printchanges, keepphase])
 		endif
 		rampmultiplebd(bd6, "3", DCheat)
 	endif
-	wave/t oldfdvaluestring
-	tempstr = oldfdvaluestring[0]
-	if (str2num(tempstr) != 0)
-		if (printchanges)
-			printf "Changing FD_SDP from %smV to 0mV\r", tempstr
-		endif
-		rampfd(fastdac, "0", 0)
-	endif
-	tempstr = old_dacvalstr[3]
 	if (str2num(tempstr) != 0)
 		if (printchanges)
 			printf "Changing DCbias(DAC3) from %smV to 0mV\r", tempstr
@@ -2148,150 +1622,35 @@ function SetupStandardEntropy([printchanges, keepphase])
 
 end
 
-function CenterOnTransition(bdx, [bdxsetpoint, fdx, width]) //centres bdx on transition by default around where it currently is, otherwise near setpoint, zeroing fdx if provided.
-	string bdx, fdx
-	variable bdxsetpoint, width
-
-	nvar fastdac, bd6
-	wave/t old_dacvalstr
-	variable oldSDR, newSDR
-	oldSDR = str2num(old_dacvalstr[str2num(bdx)])
-	if (!paramisdefault(fdx))
-		rampfd(fastdac, fdx, 0)
-	endif
-	width = paramisdefault(width) ? 40 : width
-	bdxsetpoint = paramisdefault(bdxsetpoint) ? oldSDR : bdxsetpoint
-	wave fd_0adc //Currently hard coded to use FDadc0 as CS input
-	ScanBabyDAC(bd6, bdxsetpoint-width, bdxsetpoint+width, bdx, 201, 0.001, 1000, nosave=1)
-	newSDR = FindTransitionMid(fd_0adc)
-	if (numtype(newSDR) == 0 && newSDR > -2000 && newSDR < 0) // If reasonable then center there
-		rampmultiplebd(bd6, bdx, newSDR)
-		printf "Corrected BD%s to %.1fmV\r", bdx, newSDR
-	else
-		rampmultiplebd(bd6, bdx, oldSDR)
-		printf "Reverted to old BD%s of %.1fmV\r", bdx, oldSDR
-		newSDR = oldSDR
-	endif
-	setchargesensorfd(fastdac, bd6, setpoint = str2num(old_dacvalstr[2])/300*0.8) //channel 2 is CSbias
-	return newSDR
-end
-
-function InitializeFastScan2D(startx, finx, numptsx, starty, finy, numptsy, ADCchannels, [linecut])
-	variable startx, finx, numptsx, starty, finy, numptsy, linecut
-	string ADCchannels
-	sc_OpenInstrConnections(0)
-	nvar fd = fastdac
-	variable ret = 1
-	do
-		ret = clearbuffer(fd)
-	while (ret!=0)
-
-	variable/g sc_is2d = 1  // So that savewaves saves ywave
-	string cmd = ""
-	// create waves to hold x and y data (in case I want to save it)
-	// this is pretty useless if using readvstime
-	cmd = "make /o/n=(" + num2istr(numptsx) + ") " + "sc_xdata" + "=NaN"; execute(cmd)
-	cmd = "setscale/I x " + num2str(startx) + ", " + num2str(finx) + ", \"\", " + "sc_xdata"; execute(cmd)
-	cmd = "sc_xdata" +" = x"; execute(cmd)
-
-	cmd = "make /o/n=(" + num2istr(numptsy) + ") " + "sc_ydata" + "=NaN"; execute(cmd)
-	cmd = "setscale/I x " + num2str(starty) + ", " + num2str(finy) + ", \"\", " + "sc_ydata"; execute(cmd)
-	cmd = "sc_ydata" +" = x"; execute(cmd)
-
-	if(linecut == 1)
-		variable/g sc_is2d = 2
-		make/O/n=(numptsy) sc_linestart = NaN 						//To store first xvalue of each line of data
-		cmd = "setscale/I x " + num2str(starty) + ", " + num2str(finy) + ", " + "sc_linestart"; execute(cmd)
-	endif
+//function CenterOnTransition(bdx, [bdxsetpoint, fdx, width]) //centres bdx on transition by default around where it currently is, otherwise near setpoint, zeroing fdx if provided.
+//	string bdx, fdx
+//	variable bdxsetpoint, width
+//
+//	nvar fastdac, bd6
+//	wave/t old_dacvalstr
+//	variable oldSDR, newSDR
+//	oldSDR = str2num(old_dacvalstr[str2num(bdx)])
+//	if (!paramisdefault(fdx))
+//		rampfd(fastdac, fdx, 0)
+//	endif
+//	width = paramisdefault(width) ? 40 : width
+//	bdxsetpoint = paramisdefault(bdxsetpoint) ? oldSDR : bdxsetpoint
+//	wave fd_0adc //Currently hard coded to use FDadc0 as CS input
+//	ScanBabyDAC(bd6, bdxsetpoint-width, bdxsetpoint+width, bdx, 201, 0.001, 1000, nosave=1)
+//	newSDR = FindTransitionMid(fd_0adc)
+//	if (numtype(newSDR) == 0 && newSDR > -2000 && newSDR < 0) // If reasonable then center there
+//		rampmultiplebd(bd6, bdx, newSDR)
+//		printf "Corrected BD%s to %.1fmV\r", bdx, newSDR
+//	else
+//		rampmultiplebd(bd6, bdx, oldSDR)
+//		printf "Reverted to old BD%s of %.1fmV\r", bdx, oldSDR
+//		newSDR = oldSDR
+//	endif
+//	setchargesensorfd(fastdac, bd6, setpoint = str2num(old_dacvalstr[2])/300*0.8) //channel 2 is CSbias
+//	return newSDR
+//end
 
 
-	switch (strlen(ADCchannels))
-		case 1:
-			make /o/n=(numptsx) FastScan = NaN
-			setscale /i x, startx, finx, FastScan
-
-			make /o/n=(numptsx, numptsy) FastScan_2D = NaN  //Make 2D wave to store data in
-			setscale /i x, startx, finx, FastScan_2D
-			setscale /i y, starty, finy, FastScan_2D
-
-			if (sc_is2d == 2)
-				setscale /P x, 0, (finx-startx)/numptsx, FastScan //sets x scale starting from 0 but with delta correct
-				setscale /P x, 0, (finx-startx)/numptsx, FastScan_2D //sets x scale starting from 0 but with delta correct
-			endif
-			break
-		case 2:
-			make /o/n=(2*numptsx) FastScan = NaN
-
-			make /o/n=(numptsx) FastScanCh0 = NaN
-			setscale /i x, startx, finx, FastScanCh0
-
-			make /o/n=(numptsx) FastScanCh1 = NaN
-			setscale /i x, startx, finx, FastScanCh1
-
-			make /o/n=(numptsx, numptsy) FastScanCh0_2D = NaN  //Make 2D wave to store data in
-			setscale /i x, startx, finx, FastScanCh0_2D
-			setscale /i y, starty, finy, FastScanCh0_2D
-
-			make /o/n=(numptsx, numptsy) FastScanCh1_2D = NaN  //Make 2D wave to store data in
-			setscale /i x, startx, finx, FastScanCh1_2D
-			setscale /i y, starty, finy, FastScanCh1_2D
-
-			if (sc_is2d == 2)
-				setscale /P x, 0, (finx-startx)/numptsx, FastScanCh0 //sets x scale starting from 0 but with delta correct
-				setscale /P x, 0, (finx-startx)/numptsx, FastScanCh0_2D //sets x scale starting from 0 but with delta correct
-				setscale /P x, 0, (finx-startx)/numptsx, FastScanCh1 //sets x scale starting from 0 but with delta correct
-				setscale /P x, 0, (finx-startx)/numptsx, FastScanCh1_2D //sets x scale starting from 0 but with delta correct
-			endif
-			break
-		case 4:
-			make /o/n=(4*numptsx) FastScan = NaN
-
-			make /o/n=(numptsx) FastScanCh0 = NaN
-			setscale /i x, startx, finx, FastScanCh0
-
-			make /o/n=(numptsx) FastScanCh1 = NaN
-			setscale /i x, startx, finx, FastScanCh1
-
-			make /o/n=(numptsx) FastScanCh2 = NaN
-			setscale /i x, startx, finx, FastScanCh2
-
-			make /o/n=(numptsx) FastScanCh3 = NaN
-			setscale /i x, startx, finx, FastScanCh3
-
-			make /o/n=(numptsx, numptsy) FastScanCh0_2D = NaN  //Make 2D wave to store data in
-			setscale /i x, startx, finx, FastScanCh0_2D
-			setscale /i y, starty, finy, FastScanCh0_2D
-
-			make /o/n=(numptsx, numptsy) FastScanCh1_2D = NaN  //Make 2D wave to store data in
-			setscale /i x, startx, finx, FastScanCh1_2D
-			setscale /i y, starty, finy, FastScanCh1_2D
-
-			make /o/n=(numptsx, numptsy) FastScanCh2_2D = NaN  //Make 2D wave to store data in
-			setscale /i x, startx, finx, FastScanCh2_2D
-			setscale /i y, starty, finy, FastScanCh2_2D
-
-			make /o/n=(numptsx, numptsy) FastScanCh3_2D = NaN  //Make 2D wave to store data in
-			setscale /i x, startx, finx, FastScanCh3_2D
-			setscale /i y, starty, finy, FastScanCh3_2D
-
-			if (sc_is2d == 2)
-				setscale /P x, 0, (finx-startx)/numptsx, FastScanCh0 //sets x scale starting from 0 but with delta correct
-				setscale /P x, 0, (finx-startx)/numptsx, FastScanCh0_2D //sets x scale starting from 0 but with delta correct
-				setscale /P x, 0, (finx-startx)/numptsx, FastScanCh1 //sets x scale starting from 0 but with delta correct
-				setscale /P x, 0, (finx-startx)/numptsx, FastScanCh1_2D //sets x scale starting from 0 but with delta correct
-				setscale /P x, 0, (finx-startx)/numptsx, FastScanCh2 //sets x scale starting from 0 but with delta correct
-				setscale /P x, 0, (finx-startx)/numptsx, FastScanCh2_2D //sets x scale starting from 0 but with delta correct
-				setscale /P x, 0, (finx-startx)/numptsx, FastScanCh3 //sets x scale starting from 0 but with delta correct
-				setscale /P x, 0, (finx-startx)/numptsx, FastScanCh3_2D //sets x scale starting from 0 but with delta correct
-			endif
-			break
-		default:
-			abort "Not implemented yet" //TODO: implement
-	endswitch
-	OpenPlotsFast(ADCchannels)
-
-
-end
 
 
 Function/S GetVKS()
@@ -2576,143 +1935,143 @@ function CorrectChargeSensor(instrid, dmmid, [i, check, dcheat])
 	endif
 end
 
-function setoffsetfd(bdchannel, adcchannel, [setpoint, check, direction]) //Set direction 1 or -1 correction direction
-	string bdchannel, adcchannel
-	variable setpoint, check, direction
-	nvar bd6, fastdac
-	variable val, fdval
-
-	direction = paramisdefault(direction) ? 1 : direction
-	if (direction != 1 && direction != -1)
-		abort "Direction must be 1 or -1"
-	endif
-
-	wave/t oldfdValueString
-	wave/t dacvalstr
-	wave fastscan
-	fdval = str2num(oldfdValueString[3]) //Get fddac3 val
-	fd1d(fastdac, "3", fdval, fdval, 50, 1e-6, adcchannels=adcchannel)	 //Just measures at fddac3val, i.e. get single reading
-	doupdate
-	wavestats/q fastscan
-	val = V_avg //Average reading at setpoint
-
-	variable i=0, cdac, nextdac //Current dacval
-	if (abs(val-setpoint) > 0.001)
-		do
-			cdac = str2num(dacvalstr[str2num(bdchannel)][1])
-			if (val < setpoint)
-				nextdac = cdac-0.1*direction
-			elseif (val > setpoint)
-				nextdac = cdac+0.1*direction
-			else
-				print "Something weird happened in SetOffsetFD"
-				break
-			endif
-
-			if (check==0) //no user input
-				if (-50 < nextdac && nextdac < 50) 		//Prevent it doing something crazy
-					rampmultiplebd(bd6, bdchannel, nextdac, ramprate=100)
-				else
-					print "Could not correct offset"
-					break
-				endif
-			else //ask for user input
-				doAlert/T="About to change DAC"+bdchannel 1, "Scan wants to ramp DAC"+bdchannel+" to " + num2str(nextdac) +"mV, is that OK?"
-				if (V_flag == 1)
-					rampmultiplebd(bd6, bdchannel, nextdac, ramprate=1000)
-				else
-					abort "Computer tried to do bad thing"
-				endif
-			endif
-
-			fd1d(fastdac, "3", fdval, fdval, 20, 1e-6, adcchannels=adcchannel)	 //Just measures at fdval
-			doupdate
-			wavestats/q fastscan
-			val = V_avg //Average reading at setpoint
-			i+=1
-		while (abs(val-setpoint) > 0.002 && (i < 500))
-	else
-		printf "BD%s offset left unchanged at %smV\r", bdchannel, dacvalstr[str2num(bdchannel)][1]
-		return 0
-	endif
-
-	printf "BD%s offset set to %.2gmV\r", bdchannel, nextdac
-	sc_sleep(0.1)
-
-
-
-end
-
-function setchargesensorfd(fastdac, bd, [setpoint, check, offcenter])
-	variable fastdac, bd, setpoint, check, offcenter
-	variable val, fdval, cdac5
-	variable gradient = 0.08402 //0.1122
-	variable nextdac
-	setpoint = paramisdefault(setpoint) ? 0.8 : setpoint //Defaults to 0.8mV reading which is equivalent to 8nA with CS at 1e8 bias at 300uV
-	wave/t oldfdValueString
-	wave/t dacvalstr
-	wave fastscan
-	fdval = str2num(oldfdValueString[0])
-	if (offcenter!=0)
-		fd1d(fastdac, "0", fdval-1000, fdval-1000, 50, 1e-6)	 //Just measures at fdval
-	else
-		fd1d(fastdac, "0", fdval, fdval, 50, 1e-6)	 //Just measures at fdval
-	endif
-	doupdate
-	wavestats/q fastscan
-	val = V_avg //Average reading at setpoint
-
-	sc_sleep(0.1)
-
-	if (abs(val-setpoint) > 0.02)
-		do
-			cdac5 = str2num(dacvalstr[5][1])
-			nextdac = cdac5+(setpoint-val)/gradient // This uses gradient to calculate next dacval, works well if close already
-			if(abs(val-setpoint)>0.2) //if far away just move 1mV at a time
-				if (val < setpoint)
-					nextdac = cdac5+1
-				elseif (val > setpoint)
-					nextdac = cdac5-1
-				endif
-			endif
-//			if (nextdac < -400)
-//				nextdac = cdac5-10
-//			elseif (nextdac > -150)
-//				nextdac = cdac5 + 10
+//function setoffsetfd(bdchannel, adcchannel, [setpoint, check, direction]) //Set direction 1 or -1 correction direction
+//	string bdchannel, adcchannel
+//	variable setpoint, check, direction
+//	nvar bd6, fastdac
+//	variable val, fdval
+//
+//	direction = paramisdefault(direction) ? 1 : direction
+//	if (direction != 1 && direction != -1)
+//		abort "Direction must be 1 or -1"
+//	endif
+//
+//	wave/t oldfdValueString
+//	wave/t dacvalstr
+//	wave fastscan
+//	fdval = str2num(oldfdValueString[3]) //Get fddac3 val
+//	fd1d(fastdac, "3", fdval, fdval, 50, 1e-6, adcchannels=adcchannel)	 //Just measures at fddac3val, i.e. get single reading
+//	doupdate
+//	wavestats/q fastscan
+//	val = V_avg //Average reading at setpoint
+//
+//	variable i=0, cdac, nextdac //Current dacval
+//	if (abs(val-setpoint) > 0.001)
+//		do
+//			cdac = str2num(dacvalstr[str2num(bdchannel)][1])
+//			if (val < setpoint)
+//				nextdac = cdac-0.1*direction
+//			elseif (val > setpoint)
+//				nextdac = cdac+0.1*direction
+//			else
+//				print "Something weird happened in SetOffsetFD"
+//				break
 //			endif
+//
+//			if (check==0) //no user input
+//				if (-50 < nextdac && nextdac < 50) 		//Prevent it doing something crazy
+//					rampmultiplebd(bd6, bdchannel, nextdac, ramprate=100)
+//				else
+//					print "Could not correct offset"
+//					break
+//				endif
+//			else //ask for user input
+//				doAlert/T="About to change DAC"+bdchannel 1, "Scan wants to ramp DAC"+bdchannel+" to " + num2str(nextdac) +"mV, is that OK?"
+//				if (V_flag == 1)
+//					rampmultiplebd(bd6, bdchannel, nextdac, ramprate=1000)
+//				else
+//					abort "Computer tried to do bad thing"
+//				endif
+//			endif
+//
+//			fd1d(fastdac, "3", fdval, fdval, 20, 1e-6, adcchannels=adcchannel)	 //Just measures at fdval
+//			doupdate
+//			wavestats/q fastscan
+//			val = V_avg //Average reading at setpoint
+//			i+=1
+//		while (abs(val-setpoint) > 0.002 && (i < 500))
+//	else
+//		printf "BD%s offset left unchanged at %smV\r", bdchannel, dacvalstr[str2num(bdchannel)][1]
+//		return 0
+//	endif
+//
+//	printf "BD%s offset set to %.2gmV\r", bdchannel, nextdac
+//	sc_sleep(0.1)
+//
+//
+//
+//end
 
-			if (check==0) //no user input
-				if (-500 < nextdac && nextdac < -100) 		//Prevent it doing something crazy
-					rampmultiplebd(bd, "5", nextdac, ramprate=100)
-				else
-					abort "Could not correct charge sensor"
-				endif
-			else //ask for user input
-				doAlert/T="About to change DAC5" 1, "Scan wants to ramp DAC5 to " + num2str(nextdac) +"mV, is that OK?"
-				if (V_flag == 1)
-					rampmultiplebd(bd, "5", nextdac, ramprate=1000)
-					print nextdac
-				else
-					abort "Computer tried to do bad thing"
-				endif
-			endif
-			if (offcenter!=0)
-				fd1d(fastdac, "0", fdval-1000, fdval-1000, 10, 1e-6)	 //Just measures at fdval
-			else
-				fd1d(fastdac, "0", fdval, fdval, 10, 1e-6)	 //Just measures at fdval
-			endif
-			doupdate
-			wavestats/q fastscan
-			val = V_avg //Average reading at setpoint
-
-		while (abs(val-setpoint) > 0.05)
-	endif
-	if (offcenter!=0)
-		rampfd(fastdac, "0", fdval, ramprate=50000)
-	endif
-
-	sc_sleep(0.1)
-end
+//function setchargesensorfd(fastdac, bd, [setpoint, check, offcenter])
+//	variable fastdac, bd, setpoint, check, offcenter
+//	variable val, fdval, cdac5
+//	variable gradient = 0.08402 //0.1122
+//	variable nextdac
+//	setpoint = paramisdefault(setpoint) ? 0.8 : setpoint //Defaults to 0.8mV reading which is equivalent to 8nA with CS at 1e8 bias at 300uV
+//	wave/t oldfdValueString
+//	wave/t dacvalstr
+//	wave fastscan
+//	fdval = str2num(oldfdValueString[0])
+//	if (offcenter!=0)
+//		fd1d(fastdac, "0", fdval-1000, fdval-1000, 50, 1e-6)	 //Just measures at fdval
+//	else
+//		fd1d(fastdac, "0", fdval, fdval, 50, 1e-6)	 //Just measures at fdval
+//	endif
+//	doupdate
+//	wavestats/q fastscan
+//	val = V_avg //Average reading at setpoint
+//
+//	sc_sleep(0.1)
+//
+//	if (abs(val-setpoint) > 0.02)
+//		do
+//			cdac5 = str2num(dacvalstr[5][1])
+//			nextdac = cdac5+(setpoint-val)/gradient // This uses gradient to calculate next dacval, works well if close already
+//			if(abs(val-setpoint)>0.2) //if far away just move 1mV at a time
+//				if (val < setpoint)
+//					nextdac = cdac5+1
+//				elseif (val > setpoint)
+//					nextdac = cdac5-1
+//				endif
+//			endif
+////			if (nextdac < -400)
+////				nextdac = cdac5-10
+////			elseif (nextdac > -150)
+////				nextdac = cdac5 + 10
+////			endif
+//
+//			if (check==0) //no user input
+//				if (-500 < nextdac && nextdac < -100) 		//Prevent it doing something crazy
+//					rampmultiplebd(bd, "5", nextdac, ramprate=100)
+//				else
+//					abort "Could not correct charge sensor"
+//				endif
+//			else //ask for user input
+//				doAlert/T="About to change DAC5" 1, "Scan wants to ramp DAC5 to " + num2str(nextdac) +"mV, is that OK?"
+//				if (V_flag == 1)
+//					rampmultiplebd(bd, "5", nextdac, ramprate=1000)
+//					print nextdac
+//				else
+//					abort "Computer tried to do bad thing"
+//				endif
+//			endif
+//			if (offcenter!=0)
+//				fd1d(fastdac, "0", fdval-1000, fdval-1000, 10, 1e-6)	 //Just measures at fdval
+//			else
+//				fd1d(fastdac, "0", fdval, fdval, 10, 1e-6)	 //Just measures at fdval
+//			endif
+//			doupdate
+//			wavestats/q fastscan
+//			val = V_avg //Average reading at setpoint
+//
+//		while (abs(val-setpoint) > 0.05)
+//	endif
+//	if (offcenter!=0)
+//		rampfd(fastdac, "0", fdval, ramprate=50000)
+//	endif
+//
+//	sc_sleep(0.1)
+//end
 
 
 
@@ -2767,1031 +2126,87 @@ function MacroTemplate()
 	notify("Finished all scans")
 end
 
-function thu14nov2()
-	nvar bd6, fastdac, srs1, srs2, magy, srs4, magz
-	string buffer
-	svar ls370
-	variable i, j, k
-	setls370exclusivereader(ls370, "bfsmall_mc")
-	wave/t old_dacvalstr
-//	make/o/free Var1 = {1797, 2731} //-470, -390
-//	make/o/free var1a = {1000, 3000} //+- this amount. 2000 wide 9000pts = 100mV/s
-//	make/o/free Var2 = {3000, 2500, 2000, 1500, 1000, 500, 0}
-//	make/o/free Var3 = {0}
+
+
 //
-//	sprintf buffer, "Starting Entropy vs Field scans at -470mV and -390mV SDR =========================================================================="
-//	notify(buffer)
+//function ThetaCalibration()
+////Start on a transition and it will continue to self center on that transition throughout the scans. Takes no heat transition measurement at range of temps
+////with option to do multiple mag fields at each temp.
+//	nvar bd6, srs1, fastdac, magy
+//	svar ls370
 //
-//	i=1; j=1; k=0
-//	do // Loop to change k var3
-//		do	// Loop for change j var2
-//			setls625field(magz, var2[j])
-//			timsleep(1)
-//			setls625field(magz, var2[j])
-//			timsleep(1)
-//			setls625field(magz, var2[j])
-//			timsleep(1)
-//			setls625fieldwait(magz, var2[j])
-//			timsleep(300)
-//			sprintf buffer, "Mag field should be %dmT, and magnet reports %.1fmT", var2[j], getls625field(magz)
-//			notify(buffer)
-//			do // Loop for changing i var1 and running scan
-//				loaddacs(var1[i], noask=1)
-//				setupstandardentropy(printchanges=1)
-//				centerontransition("12", fdx="0")
-//				print getls625field(magz)
-//				print getls625field(magz)
-//				print getls625field(magz)
-//				sprintf buffer, "Starting scan at SDR = %smV, Speed = %dmV/s, Fieldz = %.1fmT\r", old_dacvalstr[13], var1a[i]/10, getls625field(magz)
-//				notify(buffer)
-//				ScanFastDac2D(bd6, fastdac, -var1a[i], var1a[i], "0", 9001, 0, 0, "7", 30, ADCchannels="0123", xlabel="FD_SDP/50mV", ramprate=100000, delayx=1e-6, delayy=0.15)
-//				i+=1
-//			while (i < numpnts(Var1))
-//			i=0
+//	make/o targettemps =  {300, 275, 250, 225, 200, 175, 150, 125, 100, 75, 60, 50, 40, 30, 20}
+//	make/o heaterranges = {10, 3.1, 3.1, 3.1, 3.1, 3.1, 3.1, 3.1, 3.1, 3.1, 3.1, 1, 1, 1, 1}
+//	make/o/free fields = {0}//, -25}
+//	setLS370exclusivereader(ls370,"bfsmall_mc")
+//
+//	setsrsamplitude(srs1, 0) //AC bias 0
+//	rampmultiplebd(bd6, "3", 0) //DCbias 0
+//
+//	variable i=0, j=0
+//	do
+//		setLS370PIDcontrol(ls370,6,targettemps[i],heaterranges[i])
+//		sc_sleep(2.0)
+//		WaitTillTempStable(ls370, targettemps[i], 5, 20, 0.10)
+//		sc_sleep(60.0)
+//		print "MEASURE AT: "+num2str(targettemps[i])+"mK"
+////		notify( "MEASURE AT: "+num2str(targettemps[i])+"mK")
+//
+//		do
+////			setls625fieldwait(magy, fields[j])
+////			timsleep(60)
+//			centerontransition("12", fdx="0", width=60)
+//			printf "Starting Theta Calibration scan at %.1fmK, %.1fmT\r", targettemps[i], fields[j]
+//			ScanFastDac2D(bd6, fastdac, -1000, 1000, "0", 2001, 0, 0, "7", 50, ADCchannels="0", xlabel="FD_SDP/1000mV", ramprate=100000, delayx=3e-3, delayy=0.1)
 //			j+=1
-//		while (j < numpnts(Var2))
+//		while (j < numpnts(fields))
 //		j=0
-//		k+=1
-//	while (k< numpnts(Var3))
-
-
-	sprintf buffer, "Starting Scans at zero field mapping out SDR vs SDP =========================================================================="
-	notify(buffer)
-
-	make/o/free Var1 = {-410, -440, -470, -500, -530}
-	make/o/free Var1a = {-1350, -1300, -1250, -1200, -1150}
-	make/o/free Var2 = {0, 100, 200}
-	make/o/free Var3 = {0}
-
-	loaddacs(1797,noask=1)
-	i=0; j=0; k=0
-	do // Loop to change k var3
-		do	// Loop for change j var2
-			do // Loop for changing i var1 and running scan
-				rampmultiplebd(bd6, "13", Var1[i])
-				rampmultiplebd(bd6, "12", Var1a[i]+var2[j])
-				rampfd(fastdac, "0", 0)
-				setchargesensorfd(fastdac, bd6)
-				setsrsamplitude(srs1, 0)
-				sprintf buffer, "Starting scan at SDR = %smV, SDP = %smV, SDL = %smV, offset from 0->1 by %dmV in SDP", old_dacvalstr[13], old_dacvalstr[12], old_dacvalstr[11], var2[j]
-				notify(buffer)
-				ScanFastDac2D(bd6, fastdac, -6000, 6000, "0", 6001, var1[i]+20, var1[i]-20, "13", 41, ADCchannels="0", xlabel="FD_SDP/50mV", ramprate=100000, delayx=1e-6, delayy=0.15)
-				i+=1
-			while (i < numpnts(Var1))
-			i=0
-			j+=1
-		while (j < numpnts(Var2))
-		j=0
-		k+=1
-	while (k< numpnts(Var3))
-
-
-	resetLS370exclusivereader(ls370)
-	notify("Finished all scans")
-end
-
-
-
-
-
-
-function thu14nov()
-	nvar bd6, fastdac, srs1, srs2, magy, srs4
-	string buffer
-	svar ls370
-	variable i, j, k, diff
-	wave/t old_dacvalstr
-	setls370exclusivereader(ls370, "bfsmall_mc")
-
-	make/o/free Var1 = {-450, -440, -430, -420, -415, -410}//, -405, -400, -395, -390}
-	make/o/free Var2 = {2756}//2756} //2828 starts at -415SDR, 2756 starts at -550
-	make/o/free Var3 = {0, 1}
-
-//	loaddacs(2756, noask=1) // -550mV SDR on transition
-//	loaddacs(2793, noask=1) // -550mV SDR on 1->2 transtion
-
-	SetupStandardEntropy(printchanges=1, keepphase=1)
-	variable bd12center
-
-	//notify("Starting 5 line repeats scanning SDP +400mV -200mV, 601pts CS only on fd_0adc ==========================================================================================================")
-//	notify("Starting high field 50 line repeats +-10,000, 4001pts CSonly, then +-2000, 9001pts entropy measurements both along 0->1 transition only for now ==============================================")
-	notify("Starting +-2000, 18001pts entropy measurements along 0->1 transition only at high field =====================================================================")
-	i=0; j=0; k=1
-	do // Loop to change k var3
-//		rampmultiplebd(bd6, "", Var3[k])
-		do	// Loop for change j var2
-			loaddacs(var2[j], noask=1)
-			do // Loop for changing i var1 and running scan
-				//loaddacs(var1[i], noask=1)
-
-				rampmultiplebd(bd6, "13", var1[i])
-				SetupStandardEntropy(printchanges=1, keepphase=1)
-				if (i>0)
-					diff = var1[i]-var1[i-1]
-					centerontransition("12", fdx = "0", bdxsetpoint = str2num(old_dacvalstr[12])-2*diff)
-				else
-					loaddacs(var2[j], noask=1) //2828 starts at -415SDR, 2756 starts at -550
-					SetupStandardEntropy(printchanges=1, keepphase=1)
-					diff = var1[i]-str2num(old_dacvalstr[13])
-					rampmultiplebd(bd6, "13", var1[i])
-					centerontransition("12", fdx = "0", bdxsetpoint = str2num(old_dacvalstr[12])-2*diff)
-				endif
-				bd12center = str2num(old_dacvalstr[12])
-
-
-				switch (var3[k])
-					case 0:
-						sprintf buffer, "Starting fast CS scan at SDL = %smV, SDR = %smV\r", old_dacvalstr[11], old_dacvalstr[13]
-						notify(buffer)
-						ScanFastDac2D(bd6, fastdac, -10000, 10000, "0", 4001, 0, 0, "7", 20, ADCchannels="0", xlabel="FD_SDP/50mV", ramprate=100000, delayx=1e-6, delayy=0.15)
-						break
-					case 1:
-						sprintf buffer, "Starting slow entropy scan at SDL = %smV, SDR = %smV, SRSout = %dmV\r", old_dacvalstr[11], old_dacvalstr[13], getsrsamplitude(srs1)
-						notify(buffer)
-						ScanFastDac2D(bd6, fastdac, -1000, 1000, "0", 9001, 0, 0, "7", 30, ADCchannels="0123", xlabel="FD_SDP/50mV", ramprate=100000, delayx=1e-6, delayy=0.15)
-						break
-					default:
-						print ("Hit default in switch...")
-						break
-				endswitch
-				i+=1
-			while (i < numpnts(Var1))
-			i=0
-			j+=1
-		while (j < numpnts(Var2))
-		j=0
-		k+=1
-	while (k< numpnts(Var3))
-
-	resetLS370exclusivereader(ls370)
-	notify("Finished all scans")
-end
-
-
-function wed13nov()
-	nvar bd6, fastdac, srs1, srs2, magy, srs4, magz
-	string buffer
-	svar ls370
-	variable i, j, k
-	variable diff
-	wave/t old_dacvalstr
-	setls370exclusivereader(ls370, "bfsmall_mc")
-
-
-	make/o/free Var1 = {-435, -440}
-	notify("Starting scans at low field 0->1 transition at -430mV and -435mV SDR, 100mV/s =============================================================================================")
-	i=0
-
-	print old_dacvalstr[13]
-	do // Loop for changing i var1 and running scan
-		rampmultiplebd(bd6, "13", var1[i])
-		SetupStandardEntropy(printchanges=1, keepphase=1)
-		if (i>0)
-			diff = var1[i]-var1[i-1]
-			centerontransition("12", fdx = "0", bdxsetpoint = str2num(old_dacvalstr[12])-2*diff)
-		else
-			loaddacs(1797, noask=1) //0->1 at -470mV
-			timsleep(2.5)
-			SetupStandardEntropy(printchanges=1, keepphase=1)
-			diff = var1[i]-str2num(old_dacvalstr[13])
-			rampmultiplebd(bd6, "13", var1[i])
-			centerontransition("12", fdx = "0", bdxsetpoint = str2num(old_dacvalstr[12])-2*diff)
-		endif
-		sprintf buffer, "Starting scan at low field at SDR = %d\r", Var1[i]
-		ScanFastDac2D(bd6, fastdac, -2000, 2000, "0", 18001, 0, 0, "7", 50, ADCchannels="0123", xlabel="FD_SDP/50mV", ramprate=100000, delayx=1e-6, delayy=0.1, printramptimes=0)
-		i+=1
-	while (i < numpnts(Var1))
-
-
-	loaddacs(2893, noask=1)
-	setupstandardentropy(printchanges=1)
-	sprintf buffer, "Starting 200 repeats at super open -375mV SDR at 1000mV/s scan speed otherwise same scan parameters. Looking for sign of Kondo effect ========================================="
-	notify(buffer)
-	ScanFastDac2D(bd6, fastdac, -10000, 10000, "0", 9001, 0, 0, "7", 200, ADCchannels="0123", xlabel="FD_SDP/50mV", ramprate=100000, delayx=1e-6, delayy=0.5, printramptimes=0)
-
-
-	setls625field(magz, 3000)
-	timsleep(2)
-	setls625field(magz, 3000)
-	timsleep(2)
-	setls625fieldwait(magz, 3000)
-	sprintf buffer, "LET ME KNOW IF THIS NUMBER >>>> %.1f <<<<< IS CLOSER TO 3000 THAN 0. IT MEANS THE MAGNET DIDN'T SWEEP BACK", getls625field(magz)
-	notify(buffer)
-	timsleep(600)
-
-	loaddacs(1797, noask=1)
-	setupstandardentropy(printchanges=1)
-	ThetaDeltaESvsSRSout()
-
-	make/o/free Var1 = {1797, 2825, 2826, 2827}
-	make/o/t/free var1a = {"0->1", "1->2", "2->3", "3->4"}
-	i=0
-	notify("Starting scans of 0 -> 4 transition at high field ================================================================================================================================")
-	do // Loop for changing i var1 and running scan
-		loaddacs(var1[i], noask=1)
-		SetupStandardEntropy(printchanges=1, keepphase=1)
-		setsrsamplitude(srs1, 400)
-		centerontransition("12", fdx="0")
-		sprintf buffer, "Starting scan at high field at loaddacs = %d, which is %s transition\r", Var1[i], var1a[i]
-		ScanFastDac2D(bd6, fastdac, -2000, 2000, "0", 18001, 0, 0, "7", 50, ADCchannels="0123", xlabel="FD_SDP/50mV", ramprate=100000, delayx=1e-6, delayy=0.1, printramptimes=0)
-		i+=1
-	while (i < numpnts(Var1))
-
-
-	make/o/free Var1 = {-530, -510, -490, -470, -460, -450, -440, -430, -420, -415, -410}//, -405, -400, -395, -390}
-	make/o/free Var2 = {2756}//2756} //2828 starts at -415SDR, 2756 starts at -550
-	make/o/free Var3 = {0, 1}
-
-//	loaddacs(2756, noask=1) // -550mV SDR on transition
-//	loaddacs(2793, noask=1) // -550mV SDR on 1->2 transtion
-
-	SetupStandardEntropy(printchanges=1, keepphase=1)
-	variable bd12center
-
-	//notify("Starting 5 line repeats scanning SDP +400mV -200mV, 601pts CS only on fd_0adc ==========================================================================================================")
-//	notify("Starting high field 50 line repeats +-10,000, 4001pts CSonly, then +-2000, 9001pts entropy measurements both along 0->1 transition only for now ==============================================")
-	notify("Starting +-2000, 18001pts entropy measurements along 0->1 transition only at high field =====================================================================")
-	i=0; j=0; k=1
-	do // Loop to change k var3
-//		rampmultiplebd(bd6, "", Var3[k])
-		do	// Loop for change j var2
-			loaddacs(var2[j], noask=1)
-			do // Loop for changing i var1 and running scan
-				//loaddacs(var1[i], noask=1)
-
-				rampmultiplebd(bd6, "13", var1[i])
-				SetupStandardEntropy(printchanges=1, keepphase=1)
-				if (i>0)
-					diff = var1[i]-var1[i-1]
-					centerontransition("12", fdx = "0", bdxsetpoint = str2num(old_dacvalstr[12])-2*diff)
-				else
-					loaddacs(var2[j], noask=1) //2828 starts at -415SDR, 2756 starts at -550
-					SetupStandardEntropy(printchanges=1, keepphase=1)
-					diff = var1[i]-str2num(old_dacvalstr[13])
-					rampmultiplebd(bd6, "13", var1[i])
-					centerontransition("12", fdx = "0", bdxsetpoint = str2num(old_dacvalstr[12])-2*diff)
-				endif
-				bd12center = str2num(old_dacvalstr[12])
-
-
-				switch (var3[k])
-					case 0:
-						sprintf buffer, "Starting fast CS scan at SDL = %smV, SDR = %smV\r", old_dacvalstr[11], old_dacvalstr[13]
-						ScanFastDac2D(bd6, fastdac, -10000, 10000, "0", 4001, 0, 0, "7", 20, ADCchannels="0", xlabel="FD_SDP/50mV", ramprate=100000, delayx=1e-6, delayy=0.15)
-						break
-					case 1:
-						sprintf buffer, "Starting slow entropy scan at SDL = %smV, SDR = %smV\r", old_dacvalstr[11], old_dacvalstr[13]
-						ScanFastDac2D(bd6, fastdac, -2000, 2000, "0", 18001, 0, 0, "7", 50, ADCchannels="0123", xlabel="FD_SDP/50mV", ramprate=100000, delayx=1e-6, delayy=0.15)
-						break
-					default:
-						print ("Hit default in switch...")
-						break
-				endswitch
-				i+=1
-			while (i < numpnts(Var1))
-			i=0
-			j+=1
-		while (j < numpnts(Var2))
-		j=0
-		k+=1
-	while (k< numpnts(Var3))
-
-
-	resetLS370exclusivereader(ls370)
-	notify("Finished all scans")
-end
-
-function tue12nov2()
-	nvar bd6, fastdac, srs1, srs2, magy, srs4
-	string buffer
-	svar ls370
-	variable i, j, k
-	setls370exclusivereader(ls370, "bfsmall_mc")
-	wave/t old_dacvalstr
-	variable bd12center, diff
-////	make/o/free Var1 = {1797, 2728, 2262, 2729, 2263, 2264, 2265, 2266, 2267, 2268, 2731}//, 2341, 2342, 2343, 2344, 2345, 2346, 2347, 2348}
-////	//																					1 -> 2 starts here
-////	make/o/free Var1 = {1797, 2262, 2263, 2265, 2267, 2731}//, 2341, 2342, 2343, 2344, 2345, 2346, 2347, 2348}
-////	//																					1 -> 2 starts here
-//	make/o/free Var1 = {-550, -530, -510, -490, -470, -460, -450, -440, -430, -420, -415, -410, -405, -400, -395, -390}
-//	make/o/free Var2 = {2828}//2756} //2828 starts at -415SDR, 2756 starts at -550
-//	make/o/free Var3 = {0, 1}
+//		i+=1
+//	while ( i<numpnts(targettemps) )
 //
-////	loaddacs(2756, noask=1) // -550mV SDR on transition
-////	loaddacs(2793, noask=1) // -550mV SDR on 1->2 transtion
-//
-//	SetupStandardEntropy(printchanges=1, keepphase=1)
-//
-//
-//	//notify("Starting 5 line repeats scanning SDP +400mV -200mV, 601pts CS only on fd_0adc ==========================================================================================================")
-//	notify("Starting high field 50 line repeats +-10,000, 4001pts CSonly, then +-2000, 9001pts entropy measurements both along 0->1 transition only for now ==============================================")
-//	i=10; j=0; k=1
-//	do // Loop to change k var3
-////		rampmultiplebd(bd6, "", Var3[k])
-//		do	// Loop for change j var2
-//			loaddacs(var2[j], noask=1)
-//			do // Loop for changing i var1 and running scan
-//				//loaddacs(var1[i], noask=1)
-//
-//				rampmultiplebd(bd6, "13", var1[i])
-//				SetupStandardEntropy(printchanges=1, keepphase=1)
-//				if (i>0)
-//					diff = var1[i]-var1[i-1]
-//					centerontransition("12", fdx = "0", bdxsetpoint = str2num(old_dacvalstr[12])-2*diff)
-//				else
-//					centerontransition("12", fdx = "0")
-//				endif
-//				bd12center = str2num(old_dacvalstr[12])
-//
-//
-//				notify(buffer)
-//				switch (var3[k])
-//					case 0:
-//						sprintf buffer, "Starting fast CS scan at SDL = %smV, SDR = %smV\r", old_dacvalstr[11], old_dacvalstr[13]
-//						ScanFastDac2D(bd6, fastdac, -10000, 10000, "0", 4001, 0, 0, "7", 20, ADCchannels="0", xlabel="FD_SDP/50mV", ramprate=100000, delayx=1e-6, delayy=0.15)
-//						break
-//					case 1:
-//						sprintf buffer, "Starting slow entropy scan at SDL = %smV, SDR = %smV\r", old_dacvalstr[11], old_dacvalstr[13]
-//						ScanFastDac2D(bd6, fastdac, -2000, 2000, "0", 9001, 0, 0, "7", 50, ADCchannels="0123", xlabel="FD_SDP/50mV", ramprate=100000, delayx=1e-6, delayy=0.15)
-//						break
-//					default:
-//						print ("Hit default in switch...")
-//						break
-//				endswitch
-//				i+=1
-//			while (i < numpnts(Var1))
-//			i=0
-//			j+=1
-//		while (j < numpnts(Var2))
-//		j=0
-//		k+=1
-//	while (k< numpnts(Var3))
-//
-//	loaddacs(1797, noask=1)
-//	SetupStandardEntropy(printchanges=1, keepphase=1)
-//	notify("Starting AC bias at high field ==============================================================")
-//	ThetaDeltaESvsSRSout()
-//
-//
-//
-//	make/o/free Var1 = {1797, 2825, 2826, 2827}
-//	make/o/t/free var1a = {"0->1", "1->2", "2->3", "3->4"}
-//	i=0
-//	notify("Starting scans of 0 -> 4 transition at high field ================================================================================================================================")
-//	do // Loop for changing i var1 and running scan
-//		loaddacs(var1[i], noask=1)
-//		SetupStandardEntropy(printchanges=1, keepphase=1)
+//	// kill temperature control
+//	turnoffLS370MCheater(ls370)
+//	resetLS370exclusivereader(ls370)
+//	sc_sleep(60.0*30)
+//	printf "Base temp is %.1fmK\r", getLS370temp(ls370, "mc")
+//	do
+//		setls625fieldwait(magy, fields[j])
+//		timsleep(60)
 //		centerontransition("12", fdx="0")
-//		sprintf buffer, "Starting scan at high field at loaddacs = %d, which is %s transition\r", Var1[i], var1a[i]
-//		ScanFastDac2D(bd6, fastdac, -2000, 2000, "0", 18001, 0, 0, "7", 50, ADCchannels="0123", xlabel="FD_SDP/50mV", ramprate=100000, delayx=1e-6, delayy=0.1, printramptimes=0)
-//		i+=1
-//	while (i < numpnts(Var1))
-//	nvar magz
-//	setls625field(magz, 0)
-//	timsleep(2)
-//	setls625field(magz, 0)
-//	timsleep(2)
-//	setls625fieldwait(magz, 0)
-//	sprintf buffer, "LET ME KNOW IF THIS NUMBER >>>> %.1f <<<<< IS CLOSER TO 3000 THAN 0. IT MEANS THE MAGNET DIDN'T SWEEP BACK", getls625field(magz)
-//	notify(buffer)
-//	timsleep(300) //Let things cool again
+//		printf "Starting Theta Calibration scan at base temp, %.1fmT\r", targettemps[i], fields[j]
+//		ScanFastDac2D(bd6, fastdac, -1000, 1000, "0", 2001, 0, 0, "7", 50, ADCchannels="0", xlabel="FD_SDP/1000mV", ramprate=100000, delayx=5e-3, delayy=0.1)
+//	while (j < numpnts(fields))
+//	j=0
+//	notify("Finished Theta Calibration Measurements")
+//
+//	setls625field(magy, 0)
+//
+//// 	ScanHere for base temp
+//
+//end
 //
 //
-//	make/o/free Var1 = {-550, -530, -510, -490, -470}
-//	notify("Starting scans at low field 0->1 transition from -550mV to -470mV SDR, 100mV/s =============================================================================================")
-//	i=0
-//	loaddacs(2756, noask=1) //0->1 at -550SDR
-//	do // Loop for changing i var1 and running scan
-//		rampmultiplebd(bd6, "13", var1[i])
-//		SetupStandardEntropy(printchanges=1, keepphase=1)
-//		setsrsamplitude(srs1, 350)
-//		if (i>0)
-//			diff = var1[i]-var1[i-1]
-//			centerontransition("12", fdx = "0", bdxsetpoint = str2num(old_dacvalstr[12])-2*diff)
-//		else
-//			centerontransition("12", fdx = "0")
-//		endif
-//		sprintf buffer, "Starting scan at high field at loaddacs = %d, which is %s transition\r", Var1[i], var1a[i]
-//		ScanFastDac2D(bd6, fastdac, -2000, 2000, "0", 18001, 0, 0, "7", 50, ADCchannels="0123", xlabel="FD_SDP/50mV", ramprate=100000, delayx=1e-6, delayy=0.1, printramptimes=0)
-//		i+=1
-//	while (i < numpnts(Var1))
+//function testHeatingVsField()
+//// Aim is to see if changing perpendicular mag field affects the strange bumps we see in entropy signal for even occupation.
 //
-//	make/o/free Var1 = {1797, 2825, 2826, 2827}
-//	make/o/t/free var1a = {"0->1", "1->2", "2->3", "3->4"}
-//	i=0
-//	notify("Starting scans of 0 -> 4 transition at low field ================================================================================================================================")
-//	do // Loop for changing i var1 and running scan
-//		loaddacs(var1[i], noask=1)
-//		SetupStandardEntropy(printchanges=1, keepphase=1)
-//		setsrsamplitude(srs1, 350)
-//		centerontransition("12", fdx="0")
-//		sprintf buffer, "Starting scan at high field at loaddacs = %d, which is %s transition\r", Var1[i], var1a[i]
-//		ScanFastDac2D(bd6, fastdac, -2000, 2000, "0", 18001, 0, 0, "7", 50, ADCchannels="0123", xlabel="FD_SDP/50mV", ramprate=100000, delayx=1e-6, delayy=0.1, printramptimes=0)
-//		i+=1
-//	while (i < numpnts(Var1))
-
-
-	make/o/free Var1 = {-550, -510, -470, -450, -430, -410, -400, -390}
-	notify("Starting scans at low field 1->2 transition from -550mV to -390mV SDR, 150mV/s =============================================================================================")
-	i=0
-	loaddacs(2793, noask=1) // -550mV SDR on 1->2 transtion
-	do // Loop for changing i var1 and running scan
-		rampmultiplebd(bd6, "13", var1[i])
-		SetupStandardEntropy(printchanges=1, keepphase=1)
-		setsrsamplitude(srs1, 350)
-		if (i>0)
-			diff = var1[i]-var1[i-1]
-			centerontransition("12", fdx = "0", bdxsetpoint = str2num(old_dacvalstr[12])-2*diff)
-		else
-			centerontransition("12", fdx = "0")
-		endif
-		sprintf buffer, "Starting scan at low field at SDR = %dmV\r", Var1[i]
-		ScanFastDac2D(bd6, fastdac, -2000, 2000, "0", 12001, 0, 0, "7", 30, ADCchannels="0123", xlabel="FD_SDP/50mV", ramprate=100000, delayx=1e-6, delayy=0.1, printramptimes=0)
-		i+=1
-	while (i < numpnts(Var1))
-
-
-	steptempscanSomething2()
-
-
-	resetLS370exclusivereader(ls370)
-	notify("Finished all scans")
-end
-
-function tue12nov()
-	nvar bd6, fastdac, srs1, srs2, magy, srs4
-	string buffer
-	svar ls370
-	variable i, j, k
-	setls370exclusivereader(ls370, "bfsmall_mc")
-
-
-//	make/o/free Var1 = {1797, 2728, 2262, 2729, 2263, 2264, 2265, 2266, 2267, 2268, 2731}//, 2341, 2342, 2343, 2344, 2345, 2346, 2347, 2348}
-//	//																					1 -> 2 starts here
-//	make/o/free Var1 = {1797, 2262, 2263, 2265, 2267, 2731}//, 2341, 2342, 2343, 2344, 2345, 2346, 2347, 2348}
-//	//																					1 -> 2 starts here
-	make/o/free Var1 = {-550, -530, -510, -490, -470, -460, -450, -440, -430, -420, -415, -410, -405, -400, -395, -390}
-	make/o/free Var2 = {0, 200}
-	make/o/free Var3 = {0}
-
-//	loaddacs(2756, noask=1) // -550mV SDR on transition
-//	loaddacs(2793, noask=1) // -550mV SDR on 1->2 transtion
-
-	SetupStandardEntropy(printchanges=1, keepphase=1)
-	wave/t old_dacvalstr
-	variable bd12center, diff
-	notify("Starting 5 line repeats scanning SDP +400mV -200mV, 601pts CS only on fd_0adc ==========================================================================================================")
-	i=0; j=1; k=0
-	do // Loop to change k var3
-//		rampmultiplebd(bd6, "", Var3[k])
-		do	// Loop for change j var2
-			loaddacs(2756, noask=1)
-			do // Loop for changing i var1 and running scan
-				//loaddacs(var1[i], noask=1)
-
-				rampmultiplebd(bd6, "13", var1[i])
-				SetupStandardEntropy(printchanges=1, keepphase=1)
-				if (i>0)
-					diff = var1[i]-var1[i-1]
-					centerontransition("12", fdx = "0", bdxsetpoint = str2num(old_dacvalstr[12])-2*diff)
-				else
-					centerontransition("12", fdx = "0")
-				endif
-				bd12center = str2num(old_dacvalstr[12])
-				rampmultiplebd(bd6, "12", bd12center+var2[j])
-				setchargesensorfd(fastdac, bd6)
-				rampmultiplebd(bd6, "12", bd12center)
-
-				sprintf buffer, "Starting scan at SDL = %smV, SDR = %smV, CSset at SDR+%dmV\r", old_dacvalstr[11], old_dacvalstr[13], var2[j]
-				notify(buffer)
-				//ScanFastDac2D(bd6, fastdac, -6000, 6000, "0", 2001, 0, 0, "7", 30, ADCchannels="0123", xlabel="FD_SDP/50mV", ramprate=100000, delayx=1e-6, delayy=0.15)
-				ScanBabyDACRepeat(bd6, bd12center - 200, bd12center+400, "12", 601, 0, 1000, 5, 0.15)
-				rampmultiplebd(bd6, "12", bd12center)
-				i+=1
-			while (i < numpnts(Var1))
-			i=0
-			j+=1
-		while (j < numpnts(Var2))
-		j=0
-		k+=1
-	while (k< numpnts(Var3))
-	resetLS370exclusivereader(ls370)
-	notify("Finished all scans")
-end
-
-function mon11nov()
-	nvar bd6, fastdac, srs1, srs2, magy, srs4
-	string buffer
-	svar ls370
-	variable i, j, k
-	setls370exclusivereader(ls370, "bfsmall_mc")
-
-
-	loaddacs(2730, noask=1) // -390SDR on transition
-	SetupStandardEntropy(printchanges=1)
-	notify("Starting 8000wide scan at 200mV/s at SDR = -390mV. 100 repeats=========================================================================")
-	ScanFastDac2D(bd6, fastdac, -6000, 6000, "0", 27001, 0, 0, "7", 100, ADCchannels="0123", xlabel="FD_SDP/50mV", ramprate=100000, delayx=1e-6, delayy=0.15)
-
-	loaddacs(2263, noask=1)// -425SDR
-	SetupStandardEntropy(printchanges=1)
-	centerontransition("12", fdx="0")
-	notify("Starting 8000wide scan at 200mV/s at SDR = -425mV. 100 repeats=========================================================================")
-	ScanFastDac2D(bd6, fastdac, -4000, 4000, "0", 18001, 0, 0, "7", 100, ADCchannels="0123", xlabel="FD_SDP/50mV", ramprate=100000, delayx=1e-6, delayy=0.15)
-
-	resetLS370exclusivereader(ls370)
-	notify("Finished all scans")
-end
-
-
-function sun10nov()
-	nvar bd6, fastdac, srs1, srs2, magy, srs4
-	string buffer
-	svar ls370
-	variable i, j, k
-	setls370exclusivereader(ls370, "bfsmall_mc")
-
- 	//Sat9nov()
-
-	loaddacs(1797, noask=1)
-	SetupStandardEntropy(printchanges=1, keepphase=1)
-//	centerontransition("12", fdx="0")
-//	setsrsreadout(srs1, 1, ch=1) //set srsreadout to be R
-//	notify("Starting 100 line entropy scan at standard position to see if having phase set at 24degrees keeps signal in x ================================================================")
-//	ScanFastDac2D(bd6, fastdac, -0-1000, -0+1000, "0", 9001, 0, 0, "7", 100, delayy=0.2, delayx = 1e-6, ramprate=20000, ADCchannels="0123", xlabel="FD_SDP/50mV")
-//	setsrsreadout(srs1, 0, ch=1)//setsrsreadout back to x
-
-	//make/o/free Var1 = {1797, 2262, 2263, 2264, 2265, 2266, 2267, 2268}//, 2341, 2342, 2343, 2344, 2345, 2346, 2347, 2348}
-	//																					1 -> 2 starts here
-
-	make/o/free Var1 = {-460, -440}
-	make/o/free Var2 = {0}
-	make/o/free Var3 = {0}
-
-	loaddacs(2262, noask=1)
-
-	SetupStandardEntropy(printchanges=1, keepphase=1)
-	wave/t old_dacvalstr
-	notify("Starting 50 line repeats at 100mV/s 4000 wide ==========================================================================================================")
-	i=0; j=0; k=0
-	do // Loop to change k var3
-//		rampmultiplebd(bd6, "", Var3[k])
-		do	// Loop for change j var2
-
-			do // Loop for changing i var1 and running scan
-				//loaddacs(var1[i], noask=1)
-				loaddacs(2262, noask=1)
-				rampmultiplebd(bd6, "13", var1[i])
-				SetupStandardEntropy(printchanges=1, keepphase=1)
-				centerontransition("12", fdx = "0")
-				sprintf buffer, "Starting scan at SDR = %d, SDL = %smV, SDR = %smV, HQPC = %smV\r", Var1[i], old_dacvalstr[11], old_dacvalstr[13], old_dacvalstr[15]
-				notify(buffer)
-				ScanFastDac2D(bd6, fastdac, -2000, 2000, "0", 18001, 0, 0, "7", 50, ADCchannels="0123", xlabel="FD_SDP/50mV", ramprate=100000, delayx=1e-6, delayy=0.15)
-
-				i+=1
-			while (i < numpnts(Var1))
-			i=0
-			j+=1
-		while (j < numpnts(Var2))
-		j=0
-		k+=1
-	while (k< numpnts(Var3))
-
-//	loaddacs(1797, noask=1)
-//	SetupStandardEntropy(printchanges=1, keepphase=1)
-//	centerontransition("12", fdx="0")
-//	setsrsreadout(srs1, 1, ch=1) //set srsreadout to be R
-//	setsrsreadout(srs1, 1, ch=2) //set srsreadout to be phase (I think)
-//	notify("Starting 100 line entropy scan at standard position to see R and Phase shows anything different ================================================================")
-//	ScanFastDac2D(bd6, fastdac, -0-1000, -0+1000, "0", 9001, 0, 0, "7", 100, delayy=0.2, delayx = 1e-6, ramprate=20000, ADCchannels="0123", xlabel="FD_SDP/50mV")
-//	setsrsreadout(srs1, 0, ch=1)//setsrsreadout back to x
-//	setsrsreadout(srs1, 0, ch=2) //set srsreadout to be phase (I think)
-	resetLS370exclusivereader(ls370)
-	notify("Finished all scans")
-end
-
-
-function Sat9nov()
-	nvar bd6, fastdac, srs1, srs2, magy, srs4
-	string buffer
-	svar ls370
-	variable i, j, k
-	setls370exclusivereader(ls370, "bfsmall_mc")
-
-//	make/o/free Var1 = {-930}//{-960,			-970, 		-980, 		-990, 		-930}
-//	make/o/free Var1a = {111.11}//{111.11,		111.11, 	111.11,	111.11,	111.11}
-//	make/o/free var1b = {0.03}//{0.03,		0.03, 		0.03,		0.03,		0.03}
+//	nvar fastdac, bd6, srs1, magy
 //
-//	i=0; j=0; k=0
-//	do // Loop for changing i var1 and running scan
-//		rampmultiplebd(bd6, "15", Var1[i])
-//		setsrsfrequency(srs1, var1a[i])
-//		sprintf buffer, "Staring ACbias scans at HQPC = %.1fmV, SRSfreq = %.1fHz\r", Var1[i], getsrsfrequency(srs1)
-//		notify(buffer)
-//		ThetaDeltaESvsSRSout()
-//		i+=1
-//	while (i < numpnts(Var1))
-
-	make/o/free Var1 = {-960} //QPC values
-	make/o/free Var1a = {350} //SRS amplitudes
-	make/o/free Var2 = {111.11, 	111.11, 	111.11, 	111.11, 	111.11, 		111.11, 	111.11} //Frequency
-	make/o/free Var2a = {0.03, 	0.03, 		0.03, 		0.03, 		0.03, 			0.03,		0.03}//Tc
-	make/o/free speed = {100, 	150, 		200, 		300,		400, 			500,		1000}//Scan speed multiplier (same scan time total by using more lines)
-	make/o/free var3 = {0}
-
-	print "Starting Speed scans at -960mV 111.11Hz HQPC========================================================================================"
-	loaddacs(1797, noask=1)
-	SetupStandardEntropy(printchanges=1)
-	rampmultiplebd(bd6, "3", 0)
-	i=0; j=0; k=0
-	do // Loop to change k var3
-		do	// Loop for change j Frequency and Tc
-			setsrstimeconst(srs1, var2a[j])
-			setsrstimeconst(srs4, var2a[j])
-			setsrsfrequency(srs1, var2[j])
-
-			do // Loop for changing i QPC values and running scan
-				setsrsamplitude(srs1, 4)
-				rampmultiplebd(bd6, "15", var1[i])
-				centerontransition("12", fdx="0")
-				setsrsamplitude(srs1, var1a[i])
-				sprintf buffer, "Starting Entropy repeat at HQPC = %.1fmV, SRSout = %.1f, Frequecy = %.1fHz, Tc = %.fms, Speed = %.1fmV/s\r", Var1[i], Var1a[i], Var2[j], var2a[j], speed[j]
-				notify(buffer)
-				ScanFastDac2D(bd6, fastdac, -1000, 1000, "0", round(450*2000/(1*speed[j]))+1, 0, 0, "7", 30, ADCchannels="0123", xlabel="FD_SDP/1000mV", ramprate=100000, delayx=1e-6, delayy=0.15)
-
-				i+=1
-			while (i < numpnts(Var1))
-			i=0
-			j+=1
-		while (j < numpnts(Var2))
-		j=0
-		k+=1
-	while (k< numpnts(Var3))
-
-
-//	SetupStandardEntropy(printchanges=1)
-//
-//	make/o/free Var1 = {2056, 2196, 2198, 2104, 2201, 2203, 2205, 2207}
-//	make/o/free var1a = {{-6080-550, -434, 7460-750, -506}, {-6780+300, -404, 6700, -476}, {480-100, -412, 6980-500, -446}, {-5920-300, -506, 6780-400, -576},{-6280, -476, 6780, -546}, {-1180-200, -474, 6960-400, -516}, {-560-400, -446, 7820, -486}, {-6140-400, -544, 5940-200, -612}} //x1, y1, x2, y2
-//	make/o/free var1b = {-470, -440, -410, -540, -510, -480, -450, -580}
-//	make/o/t/free var1c = {"0->1", "0->1", "0->1", "1->2", "1->2", "1->2", "1->2", "2->3"}
-//	make/o/free Var2 = {-960}
-//	make/o/free Var3 = {0}
-//	print "Starting Scans along transitions and gamma broadening ========================================================================================"
-//
-//	loaddacs(2056, noask=1) //317Hz highest signal setting
-//	rampmultiplebd(bd6, "3", 0) //set zero DCbias
-//	SetupStandardEntropy(printchanges=1)
-//
-//	i=0; j=0; k=0
-//	do // Loop to change k var3
-////		rampmultiplebd(bd6, "", Var3[k])
-//		do	// Loop for change j var2
-//			// Ramp here
-//			do // Loop for changing i var1 and running scan
-//				loaddacs(var1[i], noask=1)
-//				rampmultiplebd(bd6, "15", var2[j])
-//				centerontransition("12", fdx = "0")
-//				sprintf buffer, "Starting scan along %s transition at Loaddacs = %d, SDR = %.1fmV, with HQPC = %.fmV\r", var1c[i], Var1[i], var1b[i], var2[j]
-//				notify(buffer)
-//				ScanFastDac2DLine(bd6, fastdac, -10000, 10000, "0", 6001, "FD_SDP/50mV", var1b[i]-40, var1b[i]+40, "13", 161, 0.5, 1000, 2000, \
-//					ADCchannels="0123", delayx=1e-6, rampratex=100000, x1=var1a[0][i], y1=var1a[1][i], x2=var1a[2][i], y2=var1a[3][i], linecut=1)
-//				i+=1
-//			while (i < numpnts(Var1))
-//			i=0
-//			j+=1
-//		while (j < numpnts(Var2))
-//		j=0
-//		k+=1
-//	while (k< numpnts(Var3))
-//
-	print "Starting DCbias at -930mV HQPC ========================================================================================"
-	loaddacs(1797, noask=1)
-	SetupStandardEntropy(printchanges=1)
-	rampmultiplebd(bd6, "15", -930)
-	setsrsamplitude(srs1, 0)
-	centerontransition("12", fdx="0", width=80)
-	centerontransition("12", fdx="0", width=40)
-	sprintf buffer, "Starting DCbias with SRS=0 at HQPC = -930mV at loaddacs(1797)\r"
-	notify(buffer)
-	ScanFastDac2D(bd6, fastdac, -1000, 1000, "0", 1001, -300, 300, "3", 1201, ADCchannels="0", xlabel="FD_SDP/1000mV", ramprate=100000, delayx=1e-6, delayy=0.1, printramptimes=0)
-//
-//
-//
-	resetLS370exclusivereader(ls370)
-	notify("Finished all scans")
-end
-
-
-
-function Fri8nov()
-	nvar bd6, fastdac, srs1, srs2, magy, srs4
-	string buffer
-	svar ls370
-	variable i, j, k
-	setls370exclusivereader(ls370, "bfsmall_mc")
-	loaddacs(1797, noask=1)
-	SetupStandardEntropy(printchanges=1)
-	rampmultiplebd(bd6, "15", -980)
-
-//	setsrsfrequency(srs1, 317.1)
-//	setsrstimeconst(srs1, 0.01)
-//	ThetaDeltaESvsSRSout()
-//
-//	setsrsfrequency(srs1, 111.11)
-//	setsrstimeconst(srs1, 0.03)
-//	ThetaDeltaESvsSRSout()
-//
-//	setsrsfrequency(srs1, 317.1)
-//	setsrstimeconst(srs1, 0.03)
-//	ThetaDeltaESvsSRSout()
-//	make/o/free Var1 = {-960, 	-970, 		-980, 		-990, 		-1000,		-1010}
-//	make/o/free Var1a = {330, 	330, 		300,		210,		130,		100}
-	make/o/free Var1 = {-970, 		-980, 		-990, 		-1000}
-	make/o/free Var1a = {250, 		230,		150,		90}
-
-	i=0; j=0; k=0
-	do // Loop for changing i var1 and running scan
-		rampmultiplebd(bd6, "15", Var1[i])
-		setsrsamplitude(srs1, var1a[i])
-		sprintf buffer, "Staring EntropyVsFrequency scans at HQPC = %.1fmV, SRS1 = %.1fmV\r", Var1[i], Var1a[i]
-		notify(buffer)
-		EntropyVsFrequency()
-		i+=1
-	while (i < numpnts(Var1))
-
-
-	make/o/free Var1 = {-970, 		-980, 		-990, 		-1000}
-	make/o/free Var1a = {111.11, 		111.11,		111.11,		51.11}
-	make/o/free var1b = {0.03, 		0.03,			0.03,			0.03}
-
-	i=0; j=0; k=0
-	do // Loop for changing i var1 and running scan
-		rampmultiplebd(bd6, "15", Var1[i])
-		setsrsfrequency(srs1, var1a[i])
-		sprintf buffer, "Staring ACbias scans at HQPC = %.1fmV, SRSfreq = %.1fHz\r", Var1[i], getsrsfrequency(srs1)
-		notify(buffer)
-		ThetaDeltaESvsSRSout()
-		i+=1
-	while (i < numpnts(Var1))
-
-
-
-	resetLS370exclusivereader(ls370)
-	notify("Finished all scans")
-end
-
-function Thu7nov()
-	nvar bd6, fastdac, srs1, srs2, magy, srs4
-	string buffer
-	svar ls370
-	variable i, j, k
-
-	setls370exclusivereader(ls370, "bfsmall_mc")
-
-//	loaddacs(1797, noask=1)
-//	SetupStandardEntropy(printchanges=1)
-//	ThetaDeltaESvsSRSout()
-
-	SetupStandardEntropy(printchanges=1)
-//
-//	make/o/free Var1 = {-960, -970, -980, -990, -1000, -1010} //QPC values
-//	make/o/free Var1a = {475, 	475, 		430,		300,		165,		150} //SRS amplitudes
-	make/o/free Var1 = {-1000, -1010} //QPC values
-	make/o/free Var1a = {165,		150} //SRS amplitudes
-	make/o/free Var2 = {111.11, 317.11, 511.11} //Frequency
-	make/o/free Var2a = {0.03, 0.01, 0.01}//Tc
-	make/o/free Var2b = {1, 1, 1}//Scan speed multiplier (same scan time total by using more lines)
-	make/o/free Var3 = {1797} //SDR locations (holding SDL constant, varying SDP to stay on transition)
-	make/o/free Var3a = {-470}//SDR //Just for printing info at bottom
-	make/o/free Var3b = {-762.6}//SDL //Same
-
-
-	rampmultiplebd(bd6, "3", 0)
-	i=0; j=0; k=0
-	do // Loop to change k var3
-		loaddacs(var3[k], noask=1)
-		do	// Loop for change j Frequency and Tc
-			setsrstimeconst(srs1, var2a[j])
-			setsrstimeconst(srs4, var2a[j])
-			setsrsfrequency(srs1, var2[j])
-
-			do // Loop for changing i QPC values and running scan
-				setsrsamplitude(srs1, 4)
-				rampmultiplebd(bd6, "15", var1[i])
-				centerontransition("12", fdx="0")
-				setsrsamplitude(srs1, var1a[i])
-				sprintf buffer, "Starting Entropy repeat at HQPC = %.1fmV, SRSout = %.1f, Frequecy = %.1fHz, Tc = %.fms, Speed = %.1fmV/s, SDR = %.1fmV, SDP = %.1fmV\r", Var1[i], Var1a[i], Var2[j], var2a[j], var2b[j]*167, var3a[k], var3b[k]
-				notify(buffer)
-				ScanFastDac2D(bd6, fastdac, -1000, 1000, "0", round(4000/var2b[j])+1, 0, 0, "7", 60*var2b[j], ADCchannels="0123", xlabel="FD_SDP/1000mV", ramprate=100000, delayx=1e-6, delayy=0.1)
-
-				i+=1
-			while (i < numpnts(Var1))
-			i=0
-			j+=1
-		while (j < numpnts(Var2))
-		j=0
-		k+=1
-	while (k< numpnts(Var3))
-
-//	make/o/free Var1 = {-960, -970, -980, -990, -1000, -1010} //QPC values
-//	make/o/free Var1a = {330, 	330, 		300,		210,		130,		100} //SRS amplitudes
-	make/o/free Var1 = {-1000, -1010} //QPC values
-	make/o/free Var1a = {130,		100} //SRS amplitudes
-	make/o/free Var2 = {111.11, 317.11, 511.11} //Frequency
-	make/o/free Var2a = {0.03, 0.01, 0.01}//Tc
-	make/o/free Var2b = {1, 1, 1}//Scan speed multiplier (same scan time total by using more lines)
-	make/o/free Var3 = {1797} //SDR locations (holding SDL constant, varying SDP to stay on transition)
-	make/o/free Var3a = {-470}//SDR //Just for printing info at bottom
-	make/o/free Var3b = {-762.6}//SDL //Same
-
-
-	rampmultiplebd(bd6, "3", 0)
-	i=0; j=0; k=0
-	do // Loop to change k var3
-		loaddacs(var3[k], noask=1)
-		do	// Loop for change j Frequency and Tc
-			setsrstimeconst(srs1, var2a[j])
-			setsrstimeconst(srs4, var2a[j])
-			setsrsfrequency(srs1, var2[j])
-
-			do // Loop for changing i QPC values and running scan
-				setsrsamplitude(srs1, 4)
-				rampmultiplebd(bd6, "15", var1[i])
-				centerontransition("12", fdx="0")
-				setsrsamplitude(srs1, var1a[i])
-				sprintf buffer, "Starting Entropy repeat at HQPC = %.1fmV, SRSout = %.1f, Frequecy = %.1fHz, Tc = %.fms, Speed = %.1fmV/s, SDR = %.1fmV, SDP = %.1fmV\r", Var1[i], Var1a[i], Var2[j], var2a[j], var2b[j]*167, var3a[k], var3b[k]
-				notify(buffer)
-				ScanFastDac2D(bd6, fastdac, -1000, 1000, "0", round(4000/var2b[j])+1, 0, 0, "7", 60*var2b[j], ADCchannels="0123", xlabel="FD_SDP/1000mV", ramprate=100000, delayx=1e-6, delayy=0.1)
-
-				i+=1
-			while (i < numpnts(Var1))
-			i=0
-			j+=1
-		while (j < numpnts(Var2))
-		j=0
-		k+=1
-	while (k< numpnts(Var3))
-
-
-	resetLS370exclusivereader(ls370)
-
-	notify("Finished all scans")
-
-end
-
-
-function Wed6Nov()
-	nvar bd6, fastdac, srs1, srs2, magy, srs4
-	string buffer
-	svar ls370
-	variable i, j, k
-
-	make/o/free Var1 = {317.11}//{317.11, 111.11}
-	make/o/free var1a = {0.01}//{0.01, 0.03}
-	make/o/free Var2 = {10001}
-	wave/t old_dacvalstr
-
-	SetupStandardEntropy(printchanges=1)
-	ThetaDeltaESvsSRSout()
-
-
-	setsrsamplitude(srs1, 250)
-	rampmultiplebd(bd6,"15",-990)
-	do	// Loop for change j var2
-
-		do // Loop for changing i var1 and running scan
-			setsrsfrequency(srs1, var1[i])
-			setsrstimeconst(srs1, var1a[i])
-			setsrstimeconst(srs4, var1a[i])
-
-			centerontransition("12", fdx = "0")
-			printf "Starting scan at SDR = %smV, HQPC = %smV, Frequency = %.1f, Tc = %.1f, Phase = %.1f\r", old_dacvalstr[13], old_dacvalstr[15], getsrsfrequency(srs1), getsrstimeconst(srs1), getsrsphase(srs1)
-			ScanFastDac2D(bd6, fastdac, -1000, 1000, "0", Var2[j], 0, 0, "7", 25, ADCchannels="0123", xlabel="FD_SDP/50mV", ramprate=100000, delayx=1e-6, delayy=0.15)
-			i+=1
-		while (i < numpnts(Var1))
-		i=0
-		j+=1
-	while (j < numpnts(Var2))
-
-
-
-end
-
-function Tue5Nov()
-	nvar bd6, fastdac, srs1, srs2, magy, srs4
-	string buffer
-	svar ls370
-	variable i, j, k
-
-
-	setLS370exclusivereader(ls370,"bfsmall_mc")
-	loaddacs(1797, noask=1)
-	SetupStandardEntropy(printchanges=1)
-	ThetaDeltaESvsSRSout()
-
-
-	make/o/free Var1 = {1797, 2262, 2263, 2264, 2265, 2266, 2267, 2268, 2341, 2342, 2343, 2344, 2345, 2346, 2347, 2348}
-	//																					1 -> 2 starts here
-	make/o/free Var2 = {0}
-	make/o/free Var3 = {0}
-
-	SetupStandardEntropy(printchanges=1)
-	wave/t old_dacvalstr
-
-	i=0; j=0; k=0
-	do // Loop to change k var3
-//		rampmultiplebd(bd6, "", Var3[k])
-		do	// Loop for change j var2
-
-			do // Loop for changing i var1 and running scan
-				loaddacs(var1[i], noask=1)
-				SetupStandardEntropy(printchanges=1)
-				centerontransition("12", fdx = "0")
-				sprintf buffer, "Starting scan at loaddacs = %d, SDL = %smV, SDR = %smV, HQPC = %smV\r", Var1[i], old_dacvalstr[11], old_dacvalstr[13], old_dacvalstr[15]
-				notify(buffer)
-				ScanFastDac2D(bd6, fastdac, -2000, 2000, "0", 4001, 0, 0, "7", 100, ADCchannels="0123", xlabel="FD_SDP/50mV", ramprate=100000, delayx=1e-6, delayy=0.15)
-
-				i+=1
-			while (i < numpnts(Var1))
-			i=0
-			j+=1
-		while (j < numpnts(Var2))
-		j=0
-		k+=1
-	while (k< numpnts(Var3))
-end
-
-
-function Mon4Nov()
-	nvar bd6, fastdac, srs1, srs2, magy, srs4
-	string buffer
-	svar ls370
-	variable i, j, k
-	make/o/free Var1 = {2051, 2057}
-							//111Hz, 317Hz
-	make/o/free var1a = {111.11, 317.11}
-	make/o/free Var1b = {0.03, 0.01}
-	make/o/free var1c = {0.5, 1} //scan speed
-	make/o/free Var2 = {-8, -10}//, -25, +25} //DCbias offset
-	make/o/free var2a = {-1010, -1010}//, -1010, -1010} //HQCP
-	make/o/free var2b = {25, 25}//, 70, 70}
-	make/o/free Var3 = {0}
-
-
-
-	i=0; j=0; k=0
-	do // Loop to change k var3
-//		rampmultiplebd(bd6, "", Var3[k])
-		do	// Loop for change j var2
-			setsrsamplitude(srs1, var2b[j]) //SRS is RMS so *sqrt(2) to get amplitude
-			do // Loop for changing i var1 and running scan
-				loaddacs(var1[i], noask=1)
-				setsrsfrequency(srs1, Var1a[i])
-				setsrstimeconst(srs1, var1b[i])
-				setsrstimeconst(srs4, var1b[i])
-				rampmultiplebd(bd6, "15", var2a[j])
-				rampmultiplebd(bd6, "3", Var2[j])
-				centerontransition("12", fdx = "0")
-				sprintf buffer, "Starting scan at DCoffset = %.1fmV, Loaddacs = %d, Freq = %.1fHz, HQPC = %.1fmV, SRSout = %.1fmV\r", Var2[j], Var1[i], var1a[i], var2a[j], var2b[j]
-				notify(buffer)
-				ScanFastDac2D(bd6, fastdac, -1000, 1000, "0", round(4000/var1c[i])+1, 0, 0, "7", round(30*var1c[i]), ADCchannels="0123", xlabel="FD_SDP/1000mV", ramprate=100000, delayx=1e-6, delayy=0.1)
-
-				i+=1
-			while (i < numpnts(Var1))
-			i=0
-			j+=1
-		while (j < numpnts(Var2))
-		j=0
-		k+=1
-	while (k< numpnts(Var3))
-
-//
-//
-//
-//
-//	make/o/free Var1 = {2000, 1500, 1000, 500, 300, 200, 100} //~mV/s assuming 500Hz reading (more like 450Hz really)
+//	make/o/free Var1 = {-50, -25, 0, 25, 50} //Field mT
 //	make/o/free Var2 = {0}
 //	make/o/free Var3 = {0}
 //
-//	loaddacs(2056, noask=1) //317Hz highest signal setting
-//	rampmultiplebd(bd6, "3", 0) //set zero DCbias
-//	setsrsamplitude(srs1, 250) //equivalent to just less than 7.1nA peak
-//	setsrsfrequency(srs1, 317.11)
-//	setsrstimeconst(srs1, 0.01)
-//	setsrstimeconst(srs4, 0.01)
 //
-//	i=0; j=0; k=0
+//	variable i=0, j=0, k=0
 //	do // Loop to change k var3
 ////		rampmultiplebd(bd6, "", Var3[k])
 //		do	// Loop for change j var2
-//			// Ramp here
+////			rampmultiplebd(bd6, "", Var2[j])
 //			do // Loop for changing i var1 and running scan
-//				loaddacs(2056, noask=1)
-//				centerontransition("12", fdx = "0")
-//				sprintf buffer, "Starting scan at Speed = %.1fmV/s\r", Var1[i]
-//				notify(buffer)
-//				ScanFastDac2D(bd6, fastdac, -1000, 1000, "0", round(2000/(var1[i]/500)), 0, 0, "7", 30, ADCchannels="0123", xlabel="FD_SDP/1000mV", ramprate=100000, delayx=1e-6, delayy=0.1)
-//
+//				setls625fieldwait(magy, Var1[i])
+//				timsleep(60)
+//				CenterOnTransition("12", fdx="0")
+//				ScanFastDac2D(bd6, fastdac, -1000, 1000, "0", 2001, 0, 0, "7", 40, delayy=0.2, delayx=5e-3, ramprate=100000, ADCchannels="02", xlabel="FD_SDP/50mV", printramptimes=0)
+//				printf "Finished scan at Field = %.1fmT\r", Var1[i]//, Var2[i]//, Var3[j]
 //				i+=1
 //			while (i < numpnts(Var1))
 //			i=0
@@ -3800,1085 +2215,400 @@ function Mon4Nov()
 //		j=0
 //		k+=1
 //	while (k< numpnts(Var3))
-
-//	loaddacs(1950, noask=1)
-//	setsrsamplitude(srs1, 0)
-//	rampmultiplebd(bd6, "3", 0)
-//	rampmultiplebd(bd6, "15", -1010)
-//	centerontransition("12", fdx="0")
-//	//DC bias +- 20nA
-//	ScanFastDac2D(bd6, fastdac, -1000, 1000, "0", 1001, -100, 100, "3", 1001, ADCchannels="0", xlabel="FD_SDP/1000mV", ramprate=100000, delayx=1e-6, delayy=0.1, printramptimes=0) // I think 4 channels max speed is 450Hz.
-//	sprintf buffer, "Finished more careful DCbias with SRS=0 at HQPC = -1010mV at loaddacs(1950)\r"
-//	notify(buffer)
+//	notify("Finished all scans")
 //
-
-
-//	make/o/free Var1 = {2056, 2196, 2198, 2104, 2201, 2203, 2205, 2207}
-//	make/o/free var1a = {{-6080-550, -434, 7460-750, -506}, {-6780+300, -404, 6700, -476}, {480-100, -412, 6980-500, -446}, {-5920-300, -506, 6780-400, -576},{-6280, -476, 6780, -546}, {-1180-200, -474, 6960-400, -516}, {-560-400, -446, 7820, -486}, {-6140-400, -544, 5940-200, -612}} //x1, y1, x2, y2
-//	make/o/free var1b = {-470, -440, -410, -540, -510, -480, -450, -580}
-//	make/o/t/free var1c = {"0->1", "0->1", "0->1", "1->2", "1->2", "1->2", "1->2", "2->3"}
-//	make/o/free Var2 = {-990, -980, -1000}
-//	make/o/free Var3 = {0}
+//end
 //
-//	loaddacs(2056, noask=1) //317Hz highest signal setting
-//	rampmultiplebd(bd6, "3", 0) //set zero DCbias
-//	setsrsamplitude(srs1, 250) //equivalent to just less than 7.1nA peak
-//	setsrsfrequency(srs1, 317.11)
-//	setsrstimeconst(srs1, 0.01)
-//	setsrstimeconst(srs4, 0.01)
 //
-//	i=0; j=0; k=0
-//	do // Loop to change k var3
-////		rampmultiplebd(bd6, "", Var3[k])
-//		do	// Loop for change j var2
-//			// Ramp here
-//			do // Loop for changing i var1 and running scan
-//				loaddacs(var1[i], noask=1)
-//				rampmultiplebd(bd6, "15", var2[j])
-//				centerontransition("12", fdx = "0")
-//				sprintf buffer, "Starting scan along %s transition at Loaddacs = %d, SDR = %.1fmV, with HQPC = %.fmV\r", var1c[i], Var1[i], var1b[i], var2[j]
-//				notify(buffer)
-//				ScanFastDac2DLine(bd6, fastdac, -10000, 10000, "0", 2001, "FD_SDP/50mV", var1b[i]-40, var1b[i]+40, "13", 161, 0.5, 1000, 2000, \
-//					ADCchannels="0123", delayx=1e-6, rampratex=100000, x1=var1a[0][i], y1=var1a[1][i], x2=var1a[2][i], y2=var1a[3][i], linecut=1)
-//				i+=1
-//			while (i < numpnts(Var1))
-//			i=0
-//			j+=1
-//		while (j < numpnts(Var2))
-//		j=0
-//		k+=1
-//	while (k< numpnts(Var3))
-
-	notify("Finished all Scans")
-end
-
-
-
-function Sun3Nov()
-	nvar bd6, fastdac, srs1, srs2, magy, srs4
-	string buffer
-	svar ls370
-
-	notify("Starting Frequency dependence scans")
-
-	make/o/free Var1 = {-980, -1000} //QPC values
-	make/o/free Var2 = {0}
-	make/o/free Var3 = {1797, 2104, 2107} //SDR locations (holding SDL constant, varying SDP to stay on transition)
-	make/o/free Var3a = {-470, -539, -583}//SDR //Just for printing info at bottom
-	make/o/free Var3b = {-762.6, -600, -491}//SDL //Same
-	make/o/t/free var3c = {"0->1", "1->2", "2->3"}
-
-
-	rampmultiplebd(bd6, "3", 0)
-	variable i, j, k
-	i=0; j=0; k=0
-	do // Loop to change k var3
-		loaddacs(var3[k], noask=1)
-		do	// Loop for change j
-			//Do nothing
-			do // Loop for changing i HQPC values and running scan
-				setsrsamplitude(srs1, 4)
-				rampmultiplebd(bd6, "15", var1[i])
-				centerontransition("12", fdx="0")
-				setsrsamplitude(srs1, 300)
-
-				sprintf buffer, "Starting Entropy vs Frequency at HQPC = %.1fmV, loaddacs = %d (SDL = %.1fmV, SDR = %.1fmV, %s transition)", Var1[i], var3[k], var3a[k], var3b[k], var3c[k]
-				notify(buffer)
-				EntropyVsFrequency()
-
-
-				i+=1
-			while (i < numpnts(Var1))
-			i=0
-			j+=1
-		while (j < numpnts(Var2))
-		j=0
-		k+=1
-	while (k< numpnts(Var3))
-	notify("Finished all scans")
-
-
-	notify("Starting Field sweeps at 0, 1, 2 transitions with HQPC -980 or -1000")
-	make/o/free var1 = {1797, 2104, 2107}
-	make/o/free var2 = {-980, -1000}
-	rampmultiplebd(bd6, "3", 0)
-	setsrsamplitude(srs1, 300)
-	setsrsfrequency(srs1, 111.11)
-	setsrstimeconst(srs1, 0.03)
-	i = 0; j=0
-	do	// Loop for change j var2
-		rampmultiplebd(bd6, "15", Var2[j])
-		do // Loop for changing i var1 and running scan
-			loaddacs(var1[i], noask=1)
-			setsrsamplitude(srs1, 0)
-			centerontransition("12", fdx="0")
-			setsrsamplitude(srs1, 300)
-			setls625fieldwait(magy, 100)
-			timsleep(120)
-			sprintf buffer,  "Starting mag sweep at Loaddacs = %d, HQPC = %.1fmV. 300mV srs, 111Hz, 0.03Tc, 100 -> -100mT\r", Var1[i], Var2[j]
-			notify(buffer)
-			ScanFastDac2DMAG(bd6, fastdac, magy, -1000, 1000, "0", 4001, 100, -100, 101, ADCchannels="0123", xlabel="FD_SDP/1000mV", ramprate=100000, delayx=1e-6, delayy=10)
-			i+=1
-		while (i < numpnts(Var1))
-		i=0
-		j+=1
-	while (j < numpnts(Var2))
-end
-
-
-function Fri1nov()
-	nvar bd6, fastdac, srs1, srs2, magy, srs4
-	string buffer
-	svar ls370
-
-
-//	ScanFastDac2DLine(bd6, fastdac, 0, 9000, "0", 2001, "FD_SDP/50mV", 0, -100, "10", 11, 0.5, 1000, 2000, \
-//		ADCchannels="0123", delayx=1e-3, rampratex=100000, x2=1117, y2=-80, x1=854.5, y1=0, linecut=1)
-//	timsleep(120)
-//	ScanFastDac2DLine(bd6, fastdac, 0, 9000, "0", 2001, "FD_SDP/50mV", -100, -400, "10", 31, 0.5, 1000, 2000, \
-//		ADCchannels="0123", delayx=1e-3, rampratex=100000, x1=1474, y1=-120, x2=5348.5, y2=-380, linecut=1)
-
-
-//	rampmultiplebd(bd6, "15", -970)
-//	setsrsamplitude(srs1, 300)
-//	centerontransition("12", fdx="0")
-//	notify( "Starting mag sweep at -970mV HQPC, 300mV AC bias pos to neg")
-//	ScanFastDac2DMAG(bd6, fastdac, magy, -1000, 1000, "0", 4001, 100, -100, 101, ADCchannels="0123", xlabel="FD_SDP/1000mV", ramprate=100000, delayx=1e-6, delayy=10)
+//function ThetaDeltaESvsSRSout()
 //
-//	rampmultiplebd(bd6, "15", -985)
-//	setsrsamplitude(srs1, 300)
-//	centerontransition("12", fdx="0")
-//	notify( "Starting mag sweep at -985mV HQPC, 300mV AC bias neg to pos")
-//	ScanFastDac2DMAG(bd6, fastdac, magy, -1000, 1000, "0", 4001, -100, 100, 101, ADCchannels="0123", xlabel="FD_SDP/1000mV", ramprate=100000, delayx=1e-6, delayy=10)
-
-	//timsleep(60)
-
-	make/o/free Var1 = {-960, -970, -980, -990, -1000, -1010} //QPC values
-	make/o/free Var2 = {0, 20, 40, 60, 80, 100} //Field mT
-	make/o/free Var3 = {1797, 1798, 1799} //SDR locations (holding SDL constant, varying SDP to stay on transition)
-	make/o/free Var3a = {-470, -450, -430}//SDR //Just for printing info at bottom
-	make/o/free Var3b = {-762.6, -782.8, -804}//SDL //Same
-
-	variable i=0, j=5, k=2
-	setsrsamplitude(srs1, 0)
-	do // Loop to change k var3
-		loaddacs(var3[k], noask=1)
-		do	// Loop for change j Frequency and Tc
-			setls625fieldwait(magy, var2[j])
-			timsleep(60)
-
-			do // Loop for changing i QPC values and running scan
-				rampmultiplebd(bd6, "3", 0)
-				rampmultiplebd(bd6, "15", var1[i])
-				centerontransition("12", fdx="0")
-				//DC bias +- 20nA
-				ScanFastDac2D(bd6, fastdac, -1000, 1000, "0", 501, -200, 200, "3", 401, ADCchannels="0", xlabel="FD_SDP/1000mV", ramprate=100000, delayx=1e-6, delayy=0.1, printramptimes=0) // I think 4 channels max speed is 450Hz.
-				sprintf buffer, "Finished DCbias with SRS=0 at HQPC = %.1fmV, SDR = %.1fmV, SDP = %.1fmV\r", Var1[i], var3a[k], var3b[k]
-				notify(buffer)
-				i+=1
-			while (i < numpnts(Var1))
-			i=0
-			j+=1
-		while (j < numpnts(Var2))
-		j=0
-		k+=1
-	while (k< numpnts(Var3))
-	notify("Finished all scans")
-
-	setls625fieldwait(magy, 0)
-	timsleep(300)
-	print "Field ramped back to zero"
-
-
-
-	make/o/free Var1 = {-960, -970, -980, -990, -1000, -1010} //QPC values
-	make/o/free Var2 = {111.11, 317.11, 511.11} //Frequency
-	make/o/free Var2a = {0.03, 0.01, 0.01}//Tc
-	make/o/free Var2b = {1, 2, 2}//Scan speed multiplier (same scan time total by using more lines)
-	make/o/free Var3 = {1797, 1798, 1799} //SDR locations (holding SDL constant, varying SDP to stay on transition)
-	make/o/free Var3a = {-470, -450, -430}//SDR //Just for printing info at bottom
-	make/o/free Var3b = {-762.6, -782.8, -804}//SDL //Same
-
-
-	rampmultiplebd(bd6, "3", 0)
-	i=0; j=0; k=0
-	do // Loop to change k var3
-		loaddacs(var3[k], noask=1)
-		do	// Loop for change j Frequency and Tc
-			setsrstimeconst(srs1, var2a[j])
-			setsrstimeconst(srs4, var2a[j])
-			setsrsfrequency(srs1, var2[j])
-
-			do // Loop for changing i QPC values and running scan
-				setsrsamplitude(srs1, 4)
-				rampmultiplebd(bd6, "15", var1[i])
-				centerontransition("12", fdx="0")
-				setsrsamplitude(srs1, 300)
-				ScanFastDac2D(bd6, fastdac, -1000, 1000, "0", 4001/var2b[j], 0, 0, "7", 30*var2b[j], ADCchannels="0123", xlabel="FD_SDP/1000mV", ramprate=100000, delayx=1e-6, delayy=0.1)
-				sprintf buffer, "Finished Entropy repeat at HQPC = %.1fmV, Frequecy = %.1fHz, Tc = %.fms, Speed = %.1fmV/s, SDR = %.1fmV, SDP = %.1fmV\r", Var1[i], Var2[j], var2a[j], var2b[j]*167, var3a[k], var3b[k]
-				notify(buffer)
-				i+=1
-			while (i < numpnts(Var1))
-			i=0
-			j+=1
-		while (j < numpnts(Var2))
-		j=0
-		k+=1
-	while (k< numpnts(Var3))
-	notify("Finished all scans")
-
-	rampmultiplebd(bd6, "3", 0)
-	rampmultiplebd(bd6, "15", -1000)
-	setsrsamplitude(srs1, 300)
-	centerontransition("12", fdx="0")
-	notify("Starting mag sweep at -1000mV HQPC, 300mV AC bias pos to neg")
-	ScanFastDac2DMAG(bd6, fastdac, magy, -1000, 1000, "0", 4001, 100, -100, 101, ADCchannels="0123", xlabel="FD_SDP/1000mV", ramprate=100000, delayx=1e-6, delayy=10)
-
-	rampmultiplebd(bd6, "15", -1000)
-	setsrsamplitude(srs1, 100)
-	centerontransition("12", fdx="0")
-	notify("Starting mag sweep at -1000mV HQPC, 100mV AC bias neg to pos")
-	ScanFastDac2DMAG(bd6, fastdac, magy, -1000, 1000, "0", 4001, -100, 100, 101, ADCchannels="0123", xlabel="FD_SDP/1000mV", ramprate=100000, delayx=1e-6, delayy=10)
-
-
-end
-
-function thu31oct()
-	nvar bd6, fastdac, srs1, srs2, magy
-	string buffer
-	svar ls370
-
-	setsrstimeconst(srs1, 0.03)
-	setsrsfrequency(srs1, 111.11)
-	setsrstimeconst(srs2, 0.03)
-	setsrsamplitude(srs1, 80)
-
-//	loaddacs(1712, noask=1) //20Kohm Open top, 50mV ~15mK
-//	centerontransition("12", fdx="0")
-//	ScanFastDacRepeat(fastdac, -500, 500, "0", 501, 0.05, 10, 0.1, "FD_SDP/50mV")
-//	notify("Done 20Kohm open")
+//	nvar fastdac, bd6, srs1
+//	variable npts
 //
-//	loaddacs(1711, noask=1) //40Kohm open top, 50mV ~15mK
-//	centerontransition("12", fdx="0")
-//	ScanFastDacRepeat(fastdac, -500, 500, "0", 501, 0.05, 10, 0.1, "FD_SDP/50mV")
-//	notify("Done 40Kohm open")
 //
-	loaddacs(1702, noask=1) //20Kohm Closed top, 50mV ~15mK
-	centerontransition("12", fdx="0")
-	ScanFastDacRepeat(fastdac, -500, 500, "0", 501, 0.05, 10, 0.1, "FD_SDP/50mV")
-	notify("Done 20Kohm closed")
-
-	loaddacs(1688, noask=1) //40Kohm closed top, 50mV ~15mK
-	centerontransition("12", fdx="0")
-	ScanFastDacRepeat(fastdac, -500, 500, "0", 501, 0.05, 10, 0.1, "FD_SDP/50mV")
-	notify("Done 40Kohm closed")
-
-//	loaddacs(1685, noask=1) //High HQPC resistance, open top, 50mV ~15mK
-//	setsrsamplitude(srs1, 50)
-//	centerontransition("12", fdx="0")
-//	ScanFastDacRepeat(fastdac, -500, 500, "0", 501, 0.05, 10, 0.1, "FD_SDP/50mV")
-//	notify("Done VeryHigh Resistance open 50mV")
-//
-//	loaddacs(1712, noask=1) //20Kohm Open top, 50mV ~15mK??
-//	setsrsamplitude(srs1, 80)
-//	centerontransition("12", fdx="0")
-//	ScanFastDacRepeat(fastdac, -500, 500, "0", 501, 0.05, 10, 0.1, "FD_SDP/50mV")
-//	notify("Done 20Kohm open 80mV")
-//
-//	loaddacs(1711, noask=1) //40Kohm open top, 50mV ~15mK??
-//	centerontransition("12", fdx="0")
-//	ScanFastDacRepeat(fastdac, -500, 500, "0", 501, 0.05, 10, 0.1, "FD_SDP/50mV")
-//	notify("Done 40Kohm open 80mV")
-
-
-//	loaddacs(1711, noask=1) //40Kohm open top, 50mV ~15mK
-//	centerontransition("12", fdx="0")
-//	entropyvsfrequency(starti=4)
-//	notify("Done Freq dep 40Kohm open")
-//
-//	loaddacs(1712, noask=1) //20Kohm Open top, 50mV ~15mK
-//	centerontransition("12", fdx="0")
-//	entropyvsfrequency()
-//	notify("Done Freq dep 20Kohm open")
-
-//	setsrsamplitude(srs1, 0) //AC bias to zero for DCbias measurements
-//	make/o/free datnums = {1712, 1711, 1702, 1688, 1685} //For loading dac values
-//								//20Kohm Open, 40Kohm Open, 20Kohm closed, 40Kohm closed, HIGHohm open
+////	make/o/free Var1 = {1,	1.5,	2,	2.5,	3,	3.5,	4,	4.5,	5,	5.5,	6,	6.5,	7,	7.5,	8,	8.5,	9,	9.5,	10}//,11,12,13,14,15,16,17,18,19,20} //nA
+////	make/o/free Var1 = {1,	2,	3,	4,	5,	6,	7,	8,	9,	10}//,11,12,13,14,15,16,17,18,19,20} //nA
+//	make/o/free Var1 = {2,	4,	6,	8,	10, 12, 15, 18, 21, 25}//,11,12,13,14,15,16,17,18,19,20} //nA
 //	variable i=0
-//	do // Loop for changing i var1 and running scan
-//		//loaddacs(datnums[i], noask=1)
-//		centerontransition("12", fdx="0")
-//		ScanFastDac2D(bd6, fastdac, -1000, 1000, "0", 2001, -50, 50, "3", 201, ADCchannels="0", xlabel="FD_SDP/1000mV", ramprate=100000, delayx=5e-3, delayy=0.1)
-//		printf "Finished DC bias scan at LoadDac = %d\r", datnums[i]
-//		rampmultiplebd(bd6, "3", 0) //Zero DC bias in case it is high enough to make it difficult to find charge transition
 //
-//		setsrsamplitude(srs1, 50)
-//		ScanFastDac2DLine(bd6, fastdac, -9000, 9000, "0", 2001, "FD_SDP/50mV", \
-//			-320, -380, "11", 121, 0.5, 1000, 2000, ADCchannels="02", delayx=10e-3, \
-//			rampratex=100000, x1=-6990, y1=-324, x2=7270, y2=-376, linecut=1) //Not sure if this will work
-//		printf "Finished scan along transition at LoadDac = %d with 1nA AC bias", datnums[i]
-//		rampmultiplebd(bd6, "11", -350)
-//		setsrsamplitude(srs1, 0)
-//		notify("Finished DC bias and Scan along transition for i = " +num2str(i) + " of 4")
+//	do // Loop for changing i va1r and running scan
+////		rampmultiplebd(bd6, "", Var1[i])
+//		setsrsamplitude(srs1, Var1[i]*50) //nA to mV output for lock in
+//		CenterOnTransition("12", fdx="0")
+//		printf "Starting scan at SRSout = %.1fnA, 150mV/s\r", Var1[i]
+//		if (var1[i]<3.5)
+//			npts = 50
+//		else
+//			npts = 50
+//		endif
+//		ScanFastDac2D(bd6, fastdac, -0-1000, -0+1000, "0", 9001, 0, 0, "7", npts, delayy=0.2, delayx = 1e-6, ramprate=20000, ADCchannels="0123", xlabel="FD_SDP/50mV")
 //		i+=1
-//	while (i < numpnts(datnums))
-//	notify("All done")
-
-
-
-
-end
-
-function wed30oct()
-	nvar bd6, fastdac, srs1, magy
-	string buffer
-	svar ls370
-
-
-	loaddacs(1702, noask=1) // same as dat1663 (on 0-1 transition, BDTR fairly closed, BDBR about 20K, 50mV on srs is ~ 65mK average
-	setsrsamplitude(srs1, 50)
-	entropyvsfrequency()
-	setsrsfrequency(srs1, 111.11)
-	setsrsamplitude(srs1, 50)
-	setsrstimeconst(srs1, 0.01)
-	ScanFastDac2DLine(bd6, fastdac, -9000, 9000, "0", 2001, "FD_SDP/50mV", -320, -380, "11", 121, 0.5, 1000, 2000, ADCchannels="02", delayx=10e-3, rampratex=100000, x1=-6990, y1=-324, x2=7270, y2=-376, linecut=1)
-
-
-
-//	loaddacs(1688, noask=1) // same as dat1661 (on 0-1 transition, BDTR fairly closed, BDBR about 40K, 50mV on srs is 65mK average
-//	setsrsamplitude(srs1, 100)
-//	entropyvsfrequency()
-//	setsrsfrequency(srs1, 111.11)
-//	setsrsamplitude(srs1, 100)
-//	setsrstimeconst(srs1, 0.01)
-//	ScanFastDac2DLine(bd6, fastdac, -9000, 9000, "0", 2001, "FD_SDP/50mV", -320, -380, "11", 121, 0.5, 1000, 2000, ADCchannels="02", delayx=10e-3, rampratex=100000, x1=-6990, y1=-324, x2=7270, y2=-376, linecut=1)
+//	while (i < numpnts(Var1))
+//	notify("Finished all Entropy vs ACbias")
+//end
 //
 //
-//	loaddacs(1685, noask=1) // on 0-1 BDTR open, but big dot formed, BDBR high resistance, 50mV on SRS is 65mK average at 51Hz, probably not for any other freq
-//	setsrsfrequency(srs1, 51.11)
-//	setsrsamplitude(srs1, 100)
-//	setsrstimeconst(srs1, 0.03)
-//	ScanFastDac2DLine(bd6, fastdac, -9000, 9000, "0", 2001, "FD_SDP/50mV", -320, -380, "11", 121, 0.5, 1000, 2000, ADCchannels="02", delayx=10e-3, rampratex=100000, x1=-6990, y1=-324, x2=7270, y2=-376, linecut=1)
-
-
-end
-
-function Tues29Oct()
-// Checking if Mag field makes difference to bumps on right side of dot
-// DCbias calibration on left side of dot at 0 and -25mT at 50 and 100mK
-// Theta calibration on left side of dot with CSbias = 300uV at 0 and -25mT
-
-	nvar bd6, fastdac, srs1, magy
-	string buffer
-	svar ls370
-
-
-	setsrsamplitude(srs1, 100)
-	loaddacs(1587, noask=1) // Left side 0->1 fairly open
-
-	EntropyVsFrequency()
-
-	setsrsamplitude(srs1, 100)
-	setsrsfrequency(srs1, 111.11)
-	setsrstimeconst(srs1, 0.03)
-
-	//testHeatingVsField()
-
-//	setls625fieldwait(magy, 0)
+//
+//
+//function ThetaVsCSbias()
+//
+//	variable i = 0
+//	nvar bd6, fastdac
+//	make/o/free CSbias = {50,100, 200, 300, 400, 500} //200, 0, 50,
+//	make/o/n=(numpnts(CSbias)) ThetaVsBias = NaN
+//	setscale/i x, CSbias[0], CSbias[numpnts(CSbias)-1], ThetaVsBias
+//
+//	wave fitdata //Returned by fitchargetransition
+//	wave FastScan_2D //To pass charge transition data into fitchargetransition
+//	do
+//		rampmultiplebd(bd6, "2", CSbias[i])
+//		rampfd(fastdac, "0", -1000)
+//
+//		if (CSbias[i] > 49) //Set chargesensor somewhere good, (not possible with too little bias so use 50uV as minimum)
+//			sc_sleep(0.1)
+//			setchargesensorfd(fastdac, bd6, setpoint = 0.8/300*CSbias[i])
+//		else
+//			rampmultiplebd(bd6, "2", 50)
+//			sc_sleep(0.1)
+//			setchargesensorfd(fastdac, bd6, setpoint = 0.8/300*50)
+//			rampmultiplebd(bd6, "2", CSbias[i])
+//			sc_sleep(0.1)
+//		endif
+//
+//		ScanFastDac2D(bd6, fastdac, -1000, 1000, "0", 2001, 0, 0, "7", 4, delayy=0.1, delayx=1e-4, ramprate=100000, ADCchannels="0", xlabel="FD_SDP/50mV", setchargesensor=0)
+//		fitchargetransition(FastScan_2D)
+//
+//		make/o/free/n=(dimsize(fitdata,0)) thetavals
+//		thetavals[] = fitdata[p][2] // Is this theta??
+//		ThetaVsBias[i] = mean(thetavals)
+//
+//		i+=1
+//	while (i < numpnts(CSbias))
+//end
+//
+//
+//function VaryingSRSscanparameters()
+//
+//	nvar srs1, bd6, fastdac, dmm5
+//
+//	make/o/FREE srsT = {0.03, 	0.01, 		0.01, 		0.03, 		0.01, 		0.01, 		0.01}
+//	make/o/FREE srsF = {111.11, 	111.11, 	271.11, 	271.11,	271.11,	271.11,	511.11}
+//	make/o/FREE srsRO = {0,		0,			0,			0,			1,			0,			0}
+//	make/o/FREE delayx = {5e-3, 	1e-3,		1e-3,		1e-3,		1e-3,		1e-4,		1e-4}
+//	variable i=0
+//	do
+//		setsrstimeconst(srs1, srsT[i])
+//		setsrsfrequency(srs1, srsF[i])
+//		setsrsreadout(srs1, srsRO[i])
+//		ScanFastDac2DLine(bd6, fastdac, -8500, 8500, "0", 2001, "FD_SDP/50mV", -460, -540, "13", 321, \
+//						0.1, 1000, 2000, ADCchannels="02", delayx=delayx[i], rampratex=100000, x1=-8760, \
+//						x2=-1380, y1=-460, y2=-500, linecut = 0, followtolerance = 0, startrange = 2000)
+//		printf "Finished scan with SRStimeconst = %.3g, SRSfrequency = %.4g, SRSreadout = %d, delayx = %.2e\r", srsT[i], srsF[i], srsRO[i], delayx[i]
+//		notify("Finished i = " + num2str(i) + " of 6")
+//		i+=1
+//	while (i<numpnts(srsT))
+//
+//
+//end
+//
+//
+//
+//function EntropyVsFrequency([starti])
+//	variable starti
+//	nvar srs1, bd6, fastdac
+//
+////	make/o/free Frequency = 	{51.11,	111.11,	231.11, 	317, 	511.1,	17}
+////	make/o/free SRSt = 			{0.1, 		0.03, 		0.03, 		0.03,	0.03,	0.3}
+////	make/o/free delay = 		{0.3,		0.1,		0.1,	 	0.1	,	0.1,	1}
+//	make/o/free Frequency = 	{51.11,	111.11,	159,	231.11,	317, 	317, 	511.1}//,	17}
+//	make/o/free SRSt = 			{0.03, 	0.03, 		0.03,	0.03, 		0.03,	0.01,	0.01}//,	0.3}
+//	make/o/free speed = 		{50, 		110,		160, 	230,		320,	320,	510}//mV/s do more pts instead of long delay
+////	make/o/free delay = 		{0.1,		0.1,		0.1,	0.1,		0.1	,	0.1}//, 	0.6}
+//	//make/o/n=(601, numpnts(frequency)) EvsF = NaN
+//	//setscale/i x, -300, 300, EvsF
+//	//setscale/I y 91.11, 91.11+60*(nr-1), EvsF
+////	label left, "Frequency/Hz"
+////	label bottom, "FD_SDP/50mV"
+////	display; appendimage EvsF
+////	wave FastScan
+//	string buffer = ""
+//	variable oldsrsfreq = getsrsfrequency(srs1)
+//	variable oldsrstconst = getsrstimeconst(srs1)
+//
+//	variable i=starti
+//	do
+//		setsrstimeconst(srs1, SRSt[i])
+//		setsrsfrequency(srs1, Frequency[i])
+//		CenterOnTransition("12", fdx="0")
+//		ScanFastDac2D(bd6, fastdac, -1000, 1000, "0", round(450*2000/(1.5*speed[i])), 0, 0, "7", 50, delayy=0.5, delayx = 1e-6, ramprate=20000, ADCchannels="0123", xlabel="FD_SDP/50mV") //450Hz measure speed for all 4 channels
+////		ScanFastDacRepeat(fastdac, -500, 500, "0", 501, delay[i], 10, 0.1, "FD_SDP/50mV")
+//		sprintf buffer, "Finished at %.2fHz with SRSt = %.2fs and speed = %.2fmV/s\r", Frequency[i], SRSt[i], speed[i]
+//		notify(buffer)
+////		fd1d(fastdac, "0", -300, 300, 601, 0.3, adcchannels="02")
+////		EvsF[][i] = FastScan[2*p+1]
+//	//	doupdate
+//		i+=1
+//	while (i<numpnts(frequency))
+//	setsrsfrequency(srs1, oldsrsfreq)
+//	setsrstimeconst(srs1, oldsrstconst)
+//end
+//
+//
+//
+//function QPCscans(fastdac, bd6)  //Used ~18th Oct 2019
+//	variable fastdac, bd6
+//
+//	//9th Oct 19
+////	make/o CSR = {-200, -250, -300, -350, -400, -450, -500}
+////	make/o CStotal = {-550, -600, -650, -700, -750}
+////	make/o SDP = {-200, -300, -400, -500, -600, -700}
+//
+//	make/o CSR = {-300}
+//	make/o CSL = {-250}
+////	make/o CStotal = {-550}//, -700, -750}
+//	make/o SDP = {-650}
+//	make/o ACG = {0}
+//
+//	variable i=0, j=0, k=0
+//	do // Loop to change k var
+//		rampmultiplebd(bd6, "3", ACG[k])
+//		do	// Loop for change j var
+//			rampmultiplebd(bd6, "12", SDP[j])
+//			do // Loop for changing i var and running scan
+//
+//				rampmultiplebd(bd6, "14", CSR[i])
+//				rampmultiplebd(bd6, "4", CSL[i])
+//				//rampmultiplebd(bd6, "4", CStotal[0]-CSR[i])//CStotal[j]-CSR[i]) //Trying to keep charge sensor spine roughly same amount open
+//				rampfd(fastdac, "1", -6000+j*500)
+//				rampmultiplebd(bd6, "11", -550+j*50)
+//				timsleep(1)
+//				setchargesensorfd(fastdac, bd6, check=0)
+//				rampmultiplebd(bd6, "11", 0)
+//				rampfd(fastdac, "1", -10000)
+//				timsleep(3)
+//				ScanFastDac2D(bd6, fastdac, -10000, -000, "1", 2501, 0, -1100, "11", 111, ramprate=100000, ADCchannels="01", delayy=0.1, xlabel="FD_SDR/10mV")
+//				printf "Finished scan at CSR = %dmV, CSL = %dmV, SDP = %dmV, ACG = %d/2mV", CSR[i], CSL[i], SDP[j], ACG[k]
+//				print "\r"
+//				i+=1
+//			while (i < numpnts(CSR))
+//			notify("Finished inner loop of (3) scans, j = "+num2str(j)+" of 4")
+//			i=0
+//			j+=1
+//		while (j < numpnts(SDP))
+//		j=0
+//		k+=1
+//	while (k< numpnts(ACG))
+//	notify("Finished all scans")
+//end
+//
+//
+//macro calibrate_dcheat_chargesensor()
+//	make/o dcheat = {200, 150, 100, 50, 30, 20, 10}
+//
+//	variable i=0, j=0
+//	do
+//		if (j == 1)
+//			dcheat = dcheat*-1 // scan positive and negative to check my offset is 0
+//		endif
+//		do
+//			rampmultiplebd(bd6, "1", dcheat[i]*10-397, ramprate=1000) //*10 to convert from uV to mV on DAC, -397 to account for offset of current amp
+//			scan_transitions(bd6, dmm5, ls370, threshold=3, dcheat=dcheat[i])
+////			CorrectChargeSensor(bd6, dmm5, i=i, check=0, dcheat=dcheat[i])
+////			sc_sleep(10.0)
+////			scanbabydacrepeat(bd6, -30, +30, "3", round(60/0.152/1), 0.01, 1000, 10, 0.05)
+//			print "Finished at DC heat of "+num2str(dcheat[i])+"uV, DAC1 = "+num2str(dcheat[i]*10-397)+"mV. Scan "+num2str(i+1+j*numpnts(dcheat))+" out of "+num2str(numpnts(dcheat)*2)
+//			getslacknotice("U8W2V6QK0", message="Finished scan "+num2str(i+1+j*numpnts(dcheat))+" out of "+num2str(numpnts(dcheat)*1),min_time=1)
+//			i+=1
+//		while (i<numpnts(dcheat))
+//		i=0
+//		j+=1
+//	while (j<1)
+//end
+//
+//macro calibrate_theta()
+//
+//	make/o targettemps =  {25, 50, 75, 100, 112.5, 125, 137.5, 150, 162.5, 175, 187.5, 200}
+//	make/o heaterranges = {1, 1, 1, 3.1, 3.1, 3.1, 3.1, 3.1, 3.1, 3.1, 3.1, 3.1}
+//
+////	make/o targettemps =  {200, 175, 150, 125, 100, 75, 50, 25}
+////	make/o heaterranges = {3.1, 3.1, 3.1, 3.1, 3.1, 1, 1, 0.31}
+//	setLS370exclusivereader(ls370,"bfsmall_mc")
+////	setLS370PIDcontrol(ls370,6,200,10)  // speed up getting to 200mK
+////	sc_sleep(60.0)
+//	print "turning off AC heat"
 //	setsrsamplitude(srs1, 0)
-//	timsleep(60)
-
-	loaddacs(1587, noask=1) //Just making sure hasn't drifted away from transition
-	rampmultiplebd(bd6, "2", 300)
-
-	///////DC bias measurements for left side of dot at two mag fields and two temps
-	make/o/free Var1 = {0}//{0, -25}
-	make/o/free var2 = {50, 100}
-	make/o/free var2a = {1, 3.1}
-	variable i = 0, j = 0
-
-	do //Loop for j var2
-		setLS370exclusivereader(ls370,"bfsmall_mc")
-		setLS370PIDcontrol(ls370,6,var2[j],var2a[j])
-		sc_sleep(2.0)
-		WaitTillTempStable(ls370, var2[j], 5, 20, 0.10)
-		timsleep(60.0)
-		do // Loop for changing i var1 and running scan
-//			setls625fieldwait(magy, var1[i])
-//			timsleep(60)
-			CenterOnTransition("12", fdx="0")
-			ScanFastDac2D(bd6, fastdac, -1000, 1000, "0", 2001, -50, 50, "3", 101, ADCchannels="0", xlabel="FD_SDP/1000mV", ramprate=100000, delayx=5e-3, delayy=0.1)
-			sprintf buffer, "Finished left side DCbias (10Mohm) scan with field = %dmT, at temp = %.1fmK\r", var1[i], var2[j]
-			notify(buffer)
-			i+=1
-		while (i < numpnts(Var1))
-		i=0
-		j+=1
-	while (j < numpnts(Var2))
-	////////////////////////////////////////////////////
-
-	print "Starting Theta Calibration"
-	ThetaCalibration() //Calibrate theta on left side of dot
-	print "Finished Theta Calibration"
-
-	setLS370PIDcontrol(ls370,6,50,1)
-	sc_sleep(2.0)
-	WaitTillTempStable(ls370, 50, 5, 20, 0.10)
-	timsleep(60.0)
-
-
-	setsrsamplitude(srs1, 100)
-	setsrsfrequency(srs1, 111.11)
-	setsrstimeconst(srs1, 0.03)
-
-	loaddacs(1599, noask=1)
-	rampmultiplebd(bd6, "11", -350)
-	centerontransition("12", fdx="0", bdxsetpoint=-1376.8)
-	print "Starting scan along 0-1 transition, SDL = -350 +-30mV"
-	ScanFastDac2DLine(bd6, fastdac, -9000, 9000, "0", 2001, "FD_SDP/50mV", -350-30, -350+30, "11", 121, 0.5, 1000, 2000, ADCchannels="02", delayx=1e-3, rampratex=100000, x1 = -7160, y1 = -324, x2 = 6140, y2 = -372, linecut=1)
-
-	rampmultiplebd(bd6, "11", -350)
-	centerontransition("12", fdx="0", bdxsetpoint=-1189.6)
-	print "Starting scan along 1-2 transition, SDL = -350 +-30mV"
-	ScanFastDac2DLine(bd6, fastdac, -9000, 9000, "0", 2001, "FD_SDP/50mV", -350-30, -350+30, "11", 121, 0.5, 1000, 2000, ADCchannels="02", delayx=1e-3, rampratex=100000, x1 = -6240, y1 = -324, x2 = 5160, y2 = -368, linecut=1)
-
-	rampmultiplebd(bd6, "11", -350)
-	centerontransition("12", fdx="0", bdxsetpoint=-1189.6)
-	print "Starting scan along 2-3 transition, SDL = -350 +-30mV"
-	ScanFastDac2DLine(bd6, fastdac, -9000, 9000, "0", 2001, "FD_SDP/50mV", -350-30, -350+30, "11", 121, 0.5, 1000, 2000, ADCchannels="02", delayx=1e-3, rampratex=100000, x1 = -6600, y1 = -324, x2 = 4920, y2 = -368, linecut=1)
-
-
-
-end
-
-
-function ThetaCalibration()
-//Start on a transition and it will continue to self center on that transition throughout the scans. Takes no heat transition measurement at range of temps
-//with option to do multiple mag fields at each temp.
-	nvar bd6, srs1, fastdac, magy
-	svar ls370
-
-	make/o targettemps =  {300, 275, 250, 225, 200, 175, 150, 125, 100, 75, 60, 50, 40, 30, 20}
-	make/o heaterranges = {10, 3.1, 3.1, 3.1, 3.1, 3.1, 3.1, 3.1, 3.1, 3.1, 3.1, 1, 1, 1, 1}
-	make/o/free fields = {0}//, -25}
-	setLS370exclusivereader(ls370,"bfsmall_mc")
-
-	setsrsamplitude(srs1, 0) //AC bias 0
-	rampmultiplebd(bd6, "3", 0) //DCbias 0
-
-	variable i=0, j=0
-	do
-		setLS370PIDcontrol(ls370,6,targettemps[i],heaterranges[i])
-		sc_sleep(2.0)
-		WaitTillTempStable(ls370, targettemps[i], 5, 20, 0.10)
-		sc_sleep(60.0)
-		print "MEASURE AT: "+num2str(targettemps[i])+"mK"
-//		notify( "MEASURE AT: "+num2str(targettemps[i])+"mK")
-
-		do
-//			setls625fieldwait(magy, fields[j])
-//			timsleep(60)
-			centerontransition("12", fdx="0", width=60)
-			printf "Starting Theta Calibration scan at %.1fmK, %.1fmT\r", targettemps[i], fields[j]
-			ScanFastDac2D(bd6, fastdac, -1000, 1000, "0", 2001, 0, 0, "7", 50, ADCchannels="0", xlabel="FD_SDP/1000mV", ramprate=100000, delayx=3e-3, delayy=0.1)
-			j+=1
-		while (j < numpnts(fields))
-		j=0
-		i+=1
-	while ( i<numpnts(targettemps) )
-
-	// kill temperature control
-	turnoffLS370MCheater(ls370)
-	resetLS370exclusivereader(ls370)
-	sc_sleep(60.0*30)
-	printf "Base temp is %.1fmK\r", getLS370temp(ls370, "mc")
-	do
-		setls625fieldwait(magy, fields[j])
-		timsleep(60)
-		centerontransition("12", fdx="0")
-		printf "Starting Theta Calibration scan at base temp, %.1fmT\r", targettemps[i], fields[j]
-		ScanFastDac2D(bd6, fastdac, -1000, 1000, "0", 2001, 0, 0, "7", 50, ADCchannels="0", xlabel="FD_SDP/1000mV", ramprate=100000, delayx=5e-3, delayy=0.1)
-	while (j < numpnts(fields))
-	j=0
-	notify("Finished Theta Calibration Measurements")
-
-	setls625field(magy, 0)
-
-// 	ScanHere for base temp
-
-end
-
-
-function testHeatingVsACG()
-// Aim is to see if changing ACG affects the strange bumps we see in entropy signal for even occupation.
-
-	nvar fastdac, bd6, srs1
-
-	make/o/free Var1 = {-5, 0, 5, 10} //ACG	make/o/free Var2 = {0}
-	make/o/free Var2 = {0}
-	make/o/free Var3 = {0}
-
-
-	variable i=0, j=0, k=0
-	do // Loop to change k var3
-//		rampmultiplebd(bd6, "", Var3[k])
-		do	// Loop for change j var2
-//			rampmultiplebd(bd6, "", Var2[j])
-			do // Loop for changing i var1 and running scan
-				rampmultiplebd(bd6, "1", var1[i])
-				CenterOnTransition("12", bdxsetpoint=-1250-13*var1[i],fdx="0")
-				ScanFastDac2D(bd6, fastdac, -1000, 1000, "0", 2001, 0, 0, "7", 40, delayy=0.2, delayx=5e-3, ramprate=100000, ADCchannels="02", xlabel="FD_SDP/50mV", printramptimes=0)
-				printf "Finished scan at ACG = %.1fmV\r", Var1[i]//, Var2[i]//, Var3[j]
-				i+=1
-			while (i < numpnts(Var1))
-			i=0
-			j+=1
-		while (j < numpnts(Var2))
-		j=0
-		k+=1
-	while (k< numpnts(Var3))
-	notify("Finished all scans")
-
-end
-
-function testHeatingVsField()
-// Aim is to see if changing perpendicular mag field affects the strange bumps we see in entropy signal for even occupation.
-
-	nvar fastdac, bd6, srs1, magy
-
-	make/o/free Var1 = {-50, -25, 0, 25, 50} //Field mT
-	make/o/free Var2 = {0}
-	make/o/free Var3 = {0}
-
-
-	variable i=0, j=0, k=0
-	do // Loop to change k var3
-//		rampmultiplebd(bd6, "", Var3[k])
-		do	// Loop for change j var2
-//			rampmultiplebd(bd6, "", Var2[j])
-			do // Loop for changing i var1 and running scan
-				setls625fieldwait(magy, Var1[i])
-				timsleep(60)
-				CenterOnTransition("12", fdx="0")
-				ScanFastDac2D(bd6, fastdac, -1000, 1000, "0", 2001, 0, 0, "7", 40, delayy=0.2, delayx=5e-3, ramprate=100000, ADCchannels="02", xlabel="FD_SDP/50mV", printramptimes=0)
-				printf "Finished scan at Field = %.1fmT\r", Var1[i]//, Var2[i]//, Var3[j]
-				i+=1
-			while (i < numpnts(Var1))
-			i=0
-			j+=1
-		while (j < numpnts(Var2))
-		j=0
-		k+=1
-	while (k< numpnts(Var3))
-	notify("Finished all scans")
-
-end
-
-
-function Sunday27Oct()
-
-	svar ls370
-	nvar bd6, fastdac
-
-	setLS370PIDcontrol(ls370,6,50,1)
-	sc_sleep(2.0)
-	WaitTillTempStable(ls370, 50, 5, 20, 0.10)
-	sc_sleep(60.0)
-
-
-	rampfd(fastdac, "0", 0)
-	rampmultiplebd(bd6, "12", -1250)
-	rampmultiplebd(bd6, "13", -505)
-	rampmultiplebd(bd6, "11", -580)
-	Print "Starting scans at 50mK on 1->2 transition at SDL = -580mV, SDP = -625mV, SDR = -505mV"
-	ThetaDeltaESvsSRSout() // 1->2 transition
-	notify("Finished scans at 50mK on 1->2 transition at SDL = -580mV, SDP = -625mV, SDR = -505mV")
-
-	setLS370PIDcontrol(ls370,6,100,3.1)
-	sc_sleep(2.0)
-	WaitTillTempStable(ls370, 100, 5, 20, 0.10)
-	sc_sleep(60.0)
-
-	rampfd(fastdac, "0", 0)
-	rampmultiplebd(bd6, "11", -700)
-	rampmultiplebd(bd6, "12", -1250)
-	rampmultiplebd(bd6, "13", -475)
-	Print "Starting scans at 100mK on 0->1 transition at SDL = -700mV, SDP = -625mV, SDR = -475mV"
-	ThetaDeltaESvsSRSout() //0->1 transtion
-	notify("Finished scans at 100mK on 0->1 transition at SDL = -700mV, SDP = -625mV, SDR = -475mV")
-
-	rampfd(fastdac, "0", 0)
-	rampmultiplebd(bd6, "12", -1250)
-	rampmultiplebd(bd6, "13", -505)
-	rampmultiplebd(bd6, "11", -580)
-	Print "Starting scans at 100mK on 1->2 transition at SDL = -580mV, SDP = -625mV, SDR = -505mV"
-	ThetaDeltaESvsSRSout() //1->2 transition
-	notify("Finished scans at 100mK on 1->2 transition at SDL = -580mV, SDP = -625mV, SDR = -505mV")
-
-	rampfd(fastdac, "0", 0)
-	rampmultiplebd(bd6, "11", -700)
-	rampmultiplebd(bd6, "12", -1250)
-	rampmultiplebd(bd6, "13", -475)
-	print "Starting ThetaVsHQPCbias and NoBiasRepeats at 100mK"
-	ThetaVsHQPCbias_NoBiasRepeats(100)
-
-	turnoffLS370MCheater(ls370)
-	resetls370exclusivereader(ls370)
-	sc_sleep(90*60)
-
-	print "Starting ThetaVsHQPCbias and NoBiasRepeats at base temp of " + num2str(getLS370temp(ls370, "mc"))
-	ThetaVsHQPCbias_NoBiasRepeats(10)
-
-	setLS370PIDcontrol(ls370,6,50,1)
-	sc_sleep(2.0)
-	WaitTillTempStable(ls370, 50, 5, 20, 0.10)
-	sc_sleep(60.0)
-
-	rampfd(fastdac, "0", 0)
-	rampmultiplebd(bd6, "11", -700)
-	rampmultiplebd(bd6, "12", -1250)
-	rampmultiplebd(bd6, "13", -475)
-	Print "Starting scans at 50mK on 0->1 transition at SDL = -700mV, SDP = -625mV, SDR = -475mV"
-	ThetaDeltaESvsSRSout() //0->1 transtion
-	notify("Finished scans at 50mK on 0->1 transition at SDL = -700mV, SDP = -625mV, SDR = -475mV")
-	notify("All Done")
-
-end
-
-
-function ThetaDeltaESvsSRSout()
-
-	nvar fastdac, bd6, srs1
-	variable npts
-
-
-//	make/o/free Var1 = {1,	1.5,	2,	2.5,	3,	3.5,	4,	4.5,	5,	5.5,	6,	6.5,	7,	7.5,	8,	8.5,	9,	9.5,	10}//,11,12,13,14,15,16,17,18,19,20} //nA
-//	make/o/free Var1 = {1,	2,	3,	4,	5,	6,	7,	8,	9,	10}//,11,12,13,14,15,16,17,18,19,20} //nA
-	make/o/free Var1 = {2,	4,	6,	8,	10, 12, 15, 18, 21, 25}//,11,12,13,14,15,16,17,18,19,20} //nA
-	variable i=0
-
-	do // Loop for changing i va1r and running scan
-//		rampmultiplebd(bd6, "", Var1[i])
-		setsrsamplitude(srs1, Var1[i]*50) //nA to mV output for lock in
-		CenterOnTransition("12", fdx="0")
-		printf "Starting scan at SRSout = %.1fnA, 150mV/s\r", Var1[i]
-		if (var1[i]<3.5)
-			npts = 50
-		else
-			npts = 50
-		endif
-		ScanFastDac2D(bd6, fastdac, -0-1000, -0+1000, "0", 9001, 0, 0, "7", npts, delayy=0.2, delayx = 1e-6, ramprate=20000, ADCchannels="0123", xlabel="FD_SDP/50mV")
-		i+=1
-	while (i < numpnts(Var1))
-	notify("Finished all Entropy vs ACbias")
-end
-
-
-
-
-function ThetaVsCSbias()
-
-	variable i = 0
-	nvar bd6, fastdac
-	make/o/free CSbias = {50,100, 200, 300, 400, 500} //200, 0, 50,
-	make/o/n=(numpnts(CSbias)) ThetaVsBias = NaN
-	setscale/i x, CSbias[0], CSbias[numpnts(CSbias)-1], ThetaVsBias
-
-	wave fitdata //Returned by fitchargetransition
-	wave FastScan_2D //To pass charge transition data into fitchargetransition
-	do
-		rampmultiplebd(bd6, "2", CSbias[i])
-		rampfd(fastdac, "0", -1000)
-
-		if (CSbias[i] > 49) //Set chargesensor somewhere good, (not possible with too little bias so use 50uV as minimum)
-			sc_sleep(0.1)
-			setchargesensorfd(fastdac, bd6, setpoint = 0.8/300*CSbias[i])
-		else
-			rampmultiplebd(bd6, "2", 50)
-			sc_sleep(0.1)
-			setchargesensorfd(fastdac, bd6, setpoint = 0.8/300*50)
-			rampmultiplebd(bd6, "2", CSbias[i])
-			sc_sleep(0.1)
-		endif
-
-		ScanFastDac2D(bd6, fastdac, -1000, 1000, "0", 2001, 0, 0, "7", 4, delayy=0.1, delayx=1e-4, ramprate=100000, ADCchannels="0", xlabel="FD_SDP/50mV", setchargesensor=0)
-		fitchargetransition(FastScan_2D)
-
-		make/o/free/n=(dimsize(fitdata,0)) thetavals
-		thetavals[] = fitdata[p][2] // Is this theta??
-		ThetaVsBias[i] = mean(thetavals)
-
-		i+=1
-	while (i < numpnts(CSbias))
-end
-
-
-function VaryingSRSscanparameters()
-
-	nvar srs1, bd6, fastdac, dmm5
-
-	make/o/FREE srsT = {0.03, 	0.01, 		0.01, 		0.03, 		0.01, 		0.01, 		0.01}
-	make/o/FREE srsF = {111.11, 	111.11, 	271.11, 	271.11,	271.11,	271.11,	511.11}
-	make/o/FREE srsRO = {0,		0,			0,			0,			1,			0,			0}
-	make/o/FREE delayx = {5e-3, 	1e-3,		1e-3,		1e-3,		1e-3,		1e-4,		1e-4}
-	variable i=0
-	do
-		setsrstimeconst(srs1, srsT[i])
-		setsrsfrequency(srs1, srsF[i])
-		setsrsreadout(srs1, srsRO[i])
-		ScanFastDac2DLine(bd6, fastdac, -8500, 8500, "0", 2001, "FD_SDP/50mV", -460, -540, "13", 321, \
-						0.1, 1000, 2000, ADCchannels="02", delayx=delayx[i], rampratex=100000, x1=-8760, \
-						x2=-1380, y1=-460, y2=-500, linecut = 0, followtolerance = 0, startrange = 2000)
-		printf "Finished scan with SRStimeconst = %.3g, SRSfrequency = %.4g, SRSreadout = %d, delayx = %.2e\r", srsT[i], srsF[i], srsRO[i], delayx[i]
-		notify("Finished i = " + num2str(i) + " of 6")
-		i+=1
-	while (i<numpnts(srsT))
-
-
-end
-
-
-
-function tempEvsFvsT()
-
-	variable i=0, j=0
-	make/o/Free srsT = {0.001, 0.003, 0.010, 0.030}
-	make/o/Free srsXR = {0, 1} //0 is x 1 is R
-//	make/o/Free srsFreq = {31.11, 91.11, 151.11, 211.11, 271.11, 331.11, 391.11, 451.11} //Already in EntropyVsFrequency
-	nvar srs1
-
-	do //i loop
-		setsrsreadout(srs1, srsXR[i])
-		do
-			setsrstimeconst(srs1, srsT[j])
-			EntropyVsFrequency()
-			manualsave("EvsF")
-			printf "Finished scan at SRSt = %.3f, SRSreadout = %.3f \r", srst[j], srsXR[i]
-			j+=1
-		while (j < numpnts(srsT))
-		j=0
-		i+=1
-	while (i<numpnts(srsXR))
-end
-
-function EntropyVsFrequency([starti])
-	variable starti
-	nvar srs1, bd6, fastdac
-
-//	make/o/free Frequency = 	{51.11,	111.11,	231.11, 	317, 	511.1,	17}
-//	make/o/free SRSt = 			{0.1, 		0.03, 		0.03, 		0.03,	0.03,	0.3}
-//	make/o/free delay = 		{0.3,		0.1,		0.1,	 	0.1	,	0.1,	1}
-	make/o/free Frequency = 	{51.11,	111.11,	159,	231.11,	317, 	317, 	511.1}//,	17}
-	make/o/free SRSt = 			{0.03, 	0.03, 		0.03,	0.03, 		0.03,	0.01,	0.01}//,	0.3}
-	make/o/free speed = 		{50, 		110,		160, 	230,		320,	320,	510}//mV/s do more pts instead of long delay
-//	make/o/free delay = 		{0.1,		0.1,		0.1,	0.1,		0.1	,	0.1}//, 	0.6}
-	//make/o/n=(601, numpnts(frequency)) EvsF = NaN
-	//setscale/i x, -300, 300, EvsF
-	//setscale/I y 91.11, 91.11+60*(nr-1), EvsF
-//	label left, "Frequency/Hz"
-//	label bottom, "FD_SDP/50mV"
-//	display; appendimage EvsF
-//	wave FastScan
-	string buffer = ""
-	variable oldsrsfreq = getsrsfrequency(srs1)
-	variable oldsrstconst = getsrstimeconst(srs1)
-
-	variable i=starti
-	do
-		setsrstimeconst(srs1, SRSt[i])
-		setsrsfrequency(srs1, Frequency[i])
-		CenterOnTransition("12", fdx="0")
-		ScanFastDac2D(bd6, fastdac, -1000, 1000, "0", round(450*2000/(1.5*speed[i])), 0, 0, "7", 50, delayy=0.5, delayx = 1e-6, ramprate=20000, ADCchannels="0123", xlabel="FD_SDP/50mV") //450Hz measure speed for all 4 channels
-//		ScanFastDacRepeat(fastdac, -500, 500, "0", 501, delay[i], 10, 0.1, "FD_SDP/50mV")
-		sprintf buffer, "Finished at %.2fHz with SRSt = %.2fs and speed = %.2fmV/s\r", Frequency[i], SRSt[i], speed[i]
-		notify(buffer)
-//		fd1d(fastdac, "0", -300, 300, 601, 0.3, adcchannels="02")
-//		EvsF[][i] = FastScan[2*p+1]
-	//	doupdate
-		i+=1
-	while (i<numpnts(frequency))
-	setsrsfrequency(srs1, oldsrsfreq)
-	setsrstimeconst(srs1, oldsrstconst)
-end
-
-
-
-macro DCleakagetest()  // Used ~ 5th Oct 2019
-	rampmultiplebd(bd6, "0", 0, ramprate=1000)
-	timsleep(1)
-	print read34401A(dmm5)
-	rampmultiplebd(bd6, "0", 30, ramprate=1000)
-	timsleep(2)
-	print read34401A(dmm5)
-	doAlert/T="Massive jump?" 1, "Want to continue?"
-	if(V_flag == 2)
-		rampmultiplebd(bd6, "0", 0, ramprate=1000)
-		abort "Aborted, something wrong with DC current"
-	endif
-	rampmultiplebd(bd6, "0", -250, ramprate=1000)
-	timsleep(5)
-	scanbabydac(bd6, -250, 250, "0", 101, 0.001, 1000)
-	rampmultiplebd(bd6, "0", 0, ramprate=1000)
-
-end
-
-function QPCscans(fastdac, bd6)  //Used ~18th Oct 2019
-	variable fastdac, bd6
-
-	//9th Oct 19
-//	make/o CSR = {-200, -250, -300, -350, -400, -450, -500}
-//	make/o CStotal = {-550, -600, -650, -700, -750}
-//	make/o SDP = {-200, -300, -400, -500, -600, -700}
-
-	make/o CSR = {-300}
-	make/o CSL = {-250}
-//	make/o CStotal = {-550}//, -700, -750}
-	make/o SDP = {-650}
-	make/o ACG = {0}
-
-	variable i=0, j=0, k=0
-	do // Loop to change k var
-		rampmultiplebd(bd6, "3", ACG[k])
-		do	// Loop for change j var
-			rampmultiplebd(bd6, "12", SDP[j])
-			do // Loop for changing i var and running scan
-
-				rampmultiplebd(bd6, "14", CSR[i])
-				rampmultiplebd(bd6, "4", CSL[i])
-				//rampmultiplebd(bd6, "4", CStotal[0]-CSR[i])//CStotal[j]-CSR[i]) //Trying to keep charge sensor spine roughly same amount open
-				rampfd(fastdac, "1", -6000+j*500)
-				rampmultiplebd(bd6, "11", -550+j*50)
-				timsleep(1)
-				setchargesensorfd(fastdac, bd6, check=0)
-				rampmultiplebd(bd6, "11", 0)
-				rampfd(fastdac, "1", -10000)
-				timsleep(3)
-				ScanFastDac2D(bd6, fastdac, -10000, -000, "1", 2501, 0, -1100, "11", 111, ramprate=100000, ADCchannels="01", delayy=0.1, xlabel="FD_SDR/10mV")
-				printf "Finished scan at CSR = %dmV, CSL = %dmV, SDP = %dmV, ACG = %d/2mV", CSR[i], CSL[i], SDP[j], ACG[k]
-				print "\r"
-				i+=1
-			while (i < numpnts(CSR))
-			notify("Finished inner loop of (3) scans, j = "+num2str(j)+" of 4")
-			i=0
-			j+=1
-		while (j < numpnts(SDP))
-		j=0
-		k+=1
-	while (k< numpnts(ACG))
-	notify("Finished all scans")
-end
-
-
-
-
-
-macro calibrate_dcheat_chargesensor()
-	make/o dcheat = {200, 150, 100, 50, 30, 20, 10}
-
-	variable i=0, j=0
-	do
-		if (j == 1)
-			dcheat = dcheat*-1 // scan positive and negative to check my offset is 0
-		endif
-		do
-			rampmultiplebd(bd6, "1", dcheat[i]*10-397, ramprate=1000) //*10 to convert from uV to mV on DAC, -397 to account for offset of current amp
-			scan_transitions(bd6, dmm5, ls370, threshold=3, dcheat=dcheat[i])
-//			CorrectChargeSensor(bd6, dmm5, i=i, check=0, dcheat=dcheat[i])
-//			sc_sleep(10.0)
-//			scanbabydacrepeat(bd6, -30, +30, "3", round(60/0.152/1), 0.01, 1000, 10, 0.05)
-			print "Finished at DC heat of "+num2str(dcheat[i])+"uV, DAC1 = "+num2str(dcheat[i]*10-397)+"mV. Scan "+num2str(i+1+j*numpnts(dcheat))+" out of "+num2str(numpnts(dcheat)*2)
-			getslacknotice("U8W2V6QK0", message="Finished scan "+num2str(i+1+j*numpnts(dcheat))+" out of "+num2str(numpnts(dcheat)*1),min_time=1)
-			i+=1
-		while (i<numpnts(dcheat))
-		i=0
-		j+=1
-	while (j<1)
-end
-
-macro calibrate_theta()
-
-	make/o targettemps =  {25, 50, 75, 100, 112.5, 125, 137.5, 150, 162.5, 175, 187.5, 200}
-	make/o heaterranges = {1, 1, 1, 3.1, 3.1, 3.1, 3.1, 3.1, 3.1, 3.1, 3.1, 3.1}
-
-//	make/o targettemps =  {200, 175, 150, 125, 100, 75, 50, 25}
-//	make/o heaterranges = {3.1, 3.1, 3.1, 3.1, 3.1, 1, 1, 0.31}
-	setLS370exclusivereader(ls370,"bfsmall_mc")
-//	setLS370PIDcontrol(ls370,6,200,10)  // speed up getting to 200mK
-//	sc_sleep(60.0)
-	print "turning off AC heat"
-	setsrsamplitude(srs1, 0)
-
-	if (numpnts(targettemps) != numpnts(heaterranges)) // sanity check
-		abort "Different number of target temps to heaterranges"
-	endif
-
-	scan_transitions(bd6, dmm5, ls370, threshold=1)
-	print "Finished at base temp"
-	print getLS370temp(ls370, "mc")
-
-	variable i=0
-	do
-		setLS370PIDcontrol(ls370,6,targettemps[i],heaterranges[i])
-		sc_sleep(2.0)
-		WaitTillTempStable(ls370, targettemps[i], 5, 20, 0.10)
-		sc_sleep(60.0)
-		print "MEASURE AT: "+num2str(targettemps[i])+"mK"
-		scan_transitions(bd6, dmm5, ls370, threshold=1)
-		i+=1
-	while ( i<numpnts(targettemps) )
-	// kill temperature control
-
+//
+//	if (numpnts(targettemps) != numpnts(heaterranges)) // sanity check
+//		abort "Different number of target temps to heaterranges"
+//	endif
+//
+//	scan_transitions(bd6, dmm5, ls370, threshold=1)
+//	print "Finished at base temp"
+//	print getLS370temp(ls370, "mc")
+//
+//	variable i=0
+//	do
+//		setLS370PIDcontrol(ls370,6,targettemps[i],heaterranges[i])
+//		sc_sleep(2.0)
+//		WaitTillTempStable(ls370, targettemps[i], 5, 20, 0.10)
+//		sc_sleep(60.0)
+//		print "MEASURE AT: "+num2str(targettemps[i])+"mK"
+//		scan_transitions(bd6, dmm5, ls370, threshold=1)
+//		i+=1
+//	while ( i<numpnts(targettemps) )
+//	// kill temperature control
+//
+////	turnoffLS370MCheater(ls370)
+////	resetLS370exclusivereader(ls370)
+////	sc_sleep(60*90)
+////	scan_transitions(bd6, dmm5, ls370, threshold=1)
+//end
+//
+//
+//function ThetaVsHQPCbias_NoBiasRepeats(temperature) // Just need to set up on a transition first and hope it stays there
+//	variable temperature
+//	nvar bd6, fastdac, srs1
+//	string buffer = ""
+//
+//
+//	make/o CSbias = {100, 200, 300, 500, 750, 1000} //biases go through 1000 divider. CA0 set to offset it's own bias.
+//	variable i=0
+//
+//	rampmultiplebd(bd6, "2", 0) //
+//	setoffsetfd("0", "0", check=0) // reset CA0 offset for CS
+//
+//	setsrsamplitude(srs1, 0) // Turn off HQPC heat
+//	rampmultiplebd(bd6, "3", 0) //
+//
+//	wave fd_0adc //For centering SDR
+//	wave/t old_dacvalstr
+//	variable newSDR, oldSDR
+//	do  //No bias repeats to get accurate theta vs fridge temp
+//
+//		rampmultiplebd(bd6, "2", CSbias[i])
+//		oldSDR = str2num(old_dacvalstr[13])
+//		rampfd(fastdac, "0", 0)
+//		CenterOnTransition("13", fdx="0")
+//
+//		rampfd(fastdac, "0", -1000)
+//		setchargesensorfd(fastdac, bd6, setpoint = CSbias[i]/300*0.8)
+//		ScanFastDac2D(bd6, fastdac, -1000, 1000, "0", 2001, 0, 0, "7", 50, ADCchannels="0", xlabel="FD_SDP/1000mV", ramprate=100000, delayx=3e-3, delayy=0.1)
+//		printf "Finished no heat repeat scan with CSbias = %duV and delay = 1e-3\r", CSbias[i]
+//		i+=1
+//	while (i<numpnts(CSbias))
+//
+//
+//
+//	rampmultiplebd(bd6, "2", 500)
+//	rampfd(fastdac, "0", -1000)
+//	setchargesensorfd(fastdac, bd6, setpoint = 500/300*0.8)
+//
+//	oldSDR = str2num(old_dacvalstr[13])
+//	rampfd(fastdac, "0", 0)
+//	ScanBabyDAC(bd6, -480-20, -480+20, "13", 401, 0.001, 1000, nosave=1)
+//	newSDR = FindTransitionMid(fd_0adc)
+//	if (numtype(newSDR) == 0 && newSDR > -500 && newSDR < -400) // If reasonable then center there
+//		rampmultiplebd(bd6, "13", newSDR)
+//	else
+//		rampmultiplebd(bd6, "13", oldSDR)
+//	endif
+//
+//	rampfd(fastdac, "0", -1000)
+//	setchargesensorfd(fastdac, bd6, setpoint = 500/300*0.8)
+//	ScanFastDac2D(bd6, fastdac, -1000, 1000, "0", 2001, -500, 500, "3", 501, ADCchannels="0", xlabel="FD_SDP/1000mV", ramprate=100000, delayx=1e-6, delayy=0.1)
+//	sprintf buffer, "Finished HQPC_DCbias scan at %dmK with CSbias = 500uV\r", temperature
+//	notify(buffer)
+//end
+//
+//function steptempscanSomething()
+//	nvar bd6, srs1
+//	svar ls370
+//
+//	make/o targettemps =  {300, 275, 250, 225, 200, 175, 150, 125, 100, 75, 50, 40, 30, 20}
+//	make/o heaterranges = {10, 3.1, 3.1, 3.1, 3.1, 3.1, 3.1, 3.1, 3.1, 3.1, 1, 1, 1, 1}
+//	setLS370exclusivereader(ls370,"bfsmall_mc")
+//
+//
+//	variable i=0
+//	do
+//		setLS370PIDcontrol(ls370,6,targettemps[i],heaterranges[i])
+//		sc_sleep(2.0)
+//		WaitTillTempStable(ls370, targettemps[i], 5, 20, 0.10)
+//		sc_sleep(60.0)
+//		print "MEASURE AT: "+num2str(targettemps[i])+"mK"
+////		notify( "MEASURE AT: "+num2str(targettemps[i])+"mK")
+//		ThetaVsHQPCbias_NoBiasRepeats(targettemps[i])
+//
+//		//Scan Here
+//
+//		i+=1
+//	while ( i<numpnts(targettemps) )
+//
+//	// kill temperature control
 //	turnoffLS370MCheater(ls370)
 //	resetLS370exclusivereader(ls370)
-//	sc_sleep(60*90)
-//	scan_transitions(bd6, dmm5, ls370, threshold=1)
-end
-
-
-function ThetaVsHQPCbias_NoBiasRepeats(temperature) // Just need to set up on a transition first and hope it stays there
-	variable temperature
-	nvar bd6, fastdac, srs1
-	string buffer = ""
-
-
-	make/o CSbias = {100, 200, 300, 500, 750, 1000} //biases go through 1000 divider. CA0 set to offset it's own bias.
-	variable i=0
-
-	rampmultiplebd(bd6, "2", 0) //
-	setoffsetfd("0", "0", check=0) // reset CA0 offset for CS
-
-	setsrsamplitude(srs1, 0) // Turn off HQPC heat
-	rampmultiplebd(bd6, "3", 0) //
-
-	wave fd_0adc //For centering SDR
-	wave/t old_dacvalstr
-	variable newSDR, oldSDR
-	do  //No bias repeats to get accurate theta vs fridge temp
-
-		rampmultiplebd(bd6, "2", CSbias[i])
-		oldSDR = str2num(old_dacvalstr[13])
-		rampfd(fastdac, "0", 0)
-		CenterOnTransition("13", fdx="0")
-
-		rampfd(fastdac, "0", -1000)
-		setchargesensorfd(fastdac, bd6, setpoint = CSbias[i]/300*0.8)
-		ScanFastDac2D(bd6, fastdac, -1000, 1000, "0", 2001, 0, 0, "7", 50, ADCchannels="0", xlabel="FD_SDP/1000mV", ramprate=100000, delayx=3e-3, delayy=0.1)
-		printf "Finished no heat repeat scan with CSbias = %duV and delay = 1e-3\r", CSbias[i]
-		i+=1
-	while (i<numpnts(CSbias))
-
-
-
-	rampmultiplebd(bd6, "2", 500)
-	rampfd(fastdac, "0", -1000)
-	setchargesensorfd(fastdac, bd6, setpoint = 500/300*0.8)
-
-	oldSDR = str2num(old_dacvalstr[13])
-	rampfd(fastdac, "0", 0)
-	ScanBabyDAC(bd6, -480-20, -480+20, "13", 401, 0.001, 1000, nosave=1)
-	newSDR = FindTransitionMid(fd_0adc)
-	if (numtype(newSDR) == 0 && newSDR > -500 && newSDR < -400) // If reasonable then center there
-		rampmultiplebd(bd6, "13", newSDR)
-	else
-		rampmultiplebd(bd6, "13", oldSDR)
-	endif
-
-	rampfd(fastdac, "0", -1000)
-	setchargesensorfd(fastdac, bd6, setpoint = 500/300*0.8)
-	ScanFastDac2D(bd6, fastdac, -1000, 1000, "0", 2001, -500, 500, "3", 501, ADCchannels="0", xlabel="FD_SDP/1000mV", ramprate=100000, delayx=1e-6, delayy=0.1)
-	sprintf buffer, "Finished HQPC_DCbias scan at %dmK with CSbias = 500uV\r", temperature
-	notify(buffer)
-end
-
-function steptempscanSomething()
-	nvar bd6, srs1
-	svar ls370
-
-	make/o targettemps =  {300, 275, 250, 225, 200, 175, 150, 125, 100, 75, 50, 40, 30, 20}
-	make/o heaterranges = {10, 3.1, 3.1, 3.1, 3.1, 3.1, 3.1, 3.1, 3.1, 3.1, 1, 1, 1, 1}
-	setLS370exclusivereader(ls370,"bfsmall_mc")
-
-
-	variable i=0
-	do
-		setLS370PIDcontrol(ls370,6,targettemps[i],heaterranges[i])
-		sc_sleep(2.0)
-		WaitTillTempStable(ls370, targettemps[i], 5, 20, 0.10)
-		sc_sleep(60.0)
-		print "MEASURE AT: "+num2str(targettemps[i])+"mK"
-//		notify( "MEASURE AT: "+num2str(targettemps[i])+"mK")
-		ThetaVsHQPCbias_NoBiasRepeats(targettemps[i])
-
-		//Scan Here
-
-		i+=1
-	while ( i<numpnts(targettemps) )
-
-	// kill temperature control
-	turnoffLS370MCheater(ls370)
-	resetLS370exclusivereader(ls370)
-	sc_sleep(60.0*30)
-	ThetaVsHQPCbias_NoBiasRepeats(targettemps[i])
-
-
-// 	ScanHere for base temp
-
-end
-
-function steptempscanSomething2()
-	nvar bd6, srs1, fastdac
-	svar ls370
-
-	make/o targettemps =  	{300, 250, 200, 150, 100, 50}
-	make/o heaterranges = 	{10, 3.1, 3.1, 3.1, 3.1, 1}
-	make/o SRSout = 		  	{36, 33, 27, 21, 18, 7} //nA *50 to get mV
-
-	setLS370exclusivereader(ls370,"bfsmall_mc")
-
-	string buffer
-	wave/t old_dacvalstr
-	variable i=0, j=0
-	do
-		setLS370PIDcontrol(ls370,6,targettemps[i],heaterranges[i])
-		sc_sleep(2.0)
-		WaitTillTempStable(ls370, targettemps[i], 5, 20, 0.10)
-		sc_sleep(60.0)
-		print "MEASURE AT: "+num2str(targettemps[i])+"mK"
-
-
-
-		make/o/free Var1 = {1797, 2825, 2826, 2827}
-		make/o/t/free var1a = {"0->1", "1->2", "2->3", "3->4"}
-		j=0
-		sprintf buffer, "Starting scans of 0 -> 4 transition at zero field fridge temp = %.1fmK ================================================================================================================================", getls370temp(ls370, "mc")*1000
-		notify(buffer)
-		do // Loop for changing i var1 and running scan
-			loaddacs(var1[j], noask=1)
-			SetupStandardEntropy(printchanges=1, keepphase=1)
-			setsrsamplitude(srs1, SRSout[j]*50)
-			centerontransition("12", fdx="0")
-			sprintf buffer, "Starting scan at high field at loaddacs = %d, which is %s transition with SRSout=%.1fmV AC heat\r", Var1[j], var1a[j], SRSout[i]*50
-			print buffer
-			ScanFastDac2D(bd6, fastdac, -2000, 2000, "0", 12001, 0, 0, "7", 30, ADCchannels="0123", xlabel="FD_SDP/50mV", ramprate=100000, delayx=1e-6, delayy=0.1, printramptimes=0)
-			j+=1
-		while (j < numpnts(Var1))
-
-		setsrsamplitude(srs1, 0)
-		sprintf buffer, "Starting DC bias at temp = %.1fmK, HQPC = %smV", getls370temp(ls370, "mc")*1000, old_dacvalstr[15]
-		notify(buffer)
-		ScanFastDac2D(bd6, fastdac, -1000, 1000, "0", 1001, -500, 500, "3", 1001, ADCchannels="0", xlabel="FD_SDP/1000mV", ramprate=100000, delayx=1e-6, delayy=0.1, printramptimes=0)
-
-		i+=1
-	while ( i<numpnts(targettemps) )
-
-	// kill temperature control
-	//turnoffLS370MCheater(ls370)
-	resetLS370exclusivereader(ls370)
-
-
-// 	ScanHere for base temp
-
-end
+//	sc_sleep(60.0*30)
+//	ThetaVsHQPCbias_NoBiasRepeats(targettemps[i])
+//
+//
+//// 	ScanHere for base temp
+//
+//end
+//
+//function steptempscanSomething2()
+//	nvar bd6, srs1, fastdac
+//	svar ls370
+//
+//	make/o targettemps =  	{300, 250, 200, 150, 100, 50}
+//	make/o heaterranges = 	{10, 3.1, 3.1, 3.1, 3.1, 1}
+//	make/o SRSout = 		  	{36, 33, 27, 21, 18, 7} //nA *50 to get mV
+//
+//	setLS370exclusivereader(ls370,"bfsmall_mc")
+//
+//	string buffer
+//	wave/t old_dacvalstr
+//	variable i=0, j=0
+//	do
+//		setLS370PIDcontrol(ls370,6,targettemps[i],heaterranges[i])
+//		sc_sleep(2.0)
+//		WaitTillTempStable(ls370, targettemps[i], 5, 20, 0.10)
+//		sc_sleep(60.0)
+//		print "MEASURE AT: "+num2str(targettemps[i])+"mK"
+//
+//
+//
+//		make/o/free Var1 = {1797, 2825, 2826, 2827}
+//		make/o/t/free var1a = {"0->1", "1->2", "2->3", "3->4"}
+//		j=0
+//		sprintf buffer, "Starting scans of 0 -> 4 transition at zero field fridge temp = %.1fmK ================================================================================================================================", getls370temp(ls370, "mc")*1000
+//		notify(buffer)
+//		do // Loop for changing i var1 and running scan
+//			loaddacs(var1[j], noask=1)
+//			SetupStandardEntropy(printchanges=1, keepphase=1)
+//			setsrsamplitude(srs1, SRSout[j]*50)
+//			centerontransition("12", fdx="0")
+//			sprintf buffer, "Starting scan at high field at loaddacs = %d, which is %s transition with SRSout=%.1fmV AC heat\r", Var1[j], var1a[j], SRSout[i]*50
+//			print buffer
+//			ScanFastDac2D(bd6, fastdac, -2000, 2000, "0", 12001, 0, 0, "7", 30, ADCchannels="0123", xlabel="FD_SDP/50mV", ramprate=100000, delayx=1e-6, delayy=0.1, printramptimes=0)
+//			j+=1
+//		while (j < numpnts(Var1))
+//
+//		setsrsamplitude(srs1, 0)
+//		sprintf buffer, "Starting DC bias at temp = %.1fmK, HQPC = %smV", getls370temp(ls370, "mc")*1000, old_dacvalstr[15]
+//		notify(buffer)
+//		ScanFastDac2D(bd6, fastdac, -1000, 1000, "0", 1001, -500, 500, "3", 1001, ADCchannels="0", xlabel="FD_SDP/1000mV", ramprate=100000, delayx=1e-6, delayy=0.1, printramptimes=0)
+//
+//		i+=1
+//	while ( i<numpnts(targettemps) )
+//
+//	// kill temperature control
+//	//turnoffLS370MCheater(ls370)
+//	resetLS370exclusivereader(ls370)
+//
+//
+//// 	ScanHere for base temp
+//
+//end
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 //////////////////////////////////// Other Functions///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -4925,8 +2655,8 @@ end
 function notify(message)
 	string message
 	print message
-	getslacknotice("U8W2V6QK0", message=message,min_time=1)
-	getslacknotice("UFTMDFVTR", message=message,min_time=1)
+	getslacknotice("U8W2V6QK0", message=message,min_time=1) //Me
+	getslacknotice("UFTMDFVTR", message=message,min_time=1) //Owen? Or other way around??
 end
 
 
@@ -4944,23 +2674,25 @@ function timsleep(s)
 		sc_sleep(s)
 	endif
 end
+// TODO: Make this again
+//function noisemeasurement(fastdac, num)
+//	variable fastdac, num
+//	variable i=0
+//	wave fastscan
+//	variable ret = 1
+//	do
+//		ret = clearbuffer(fastdac)
+//	while (ret!=0)
+//
+//	for (i=0; i < num; i += 1)
+//		FD1D(fastdac, "0", 0, 0, 3000, 1e-3);
+//		SetScale/I x 0,3*1.459,"", FastScan;
+//		DSPPeriodogram/q/DBR=1000/DTRD/WIN=Hamming/SEGN={1000,0}/DEST=W_Periodogram FastScan
+//		doupdate
+//	endfor
+//end
 
-function noisemeasurement(fastdac, num)
-	variable fastdac, num
-	variable i=0
-	wave fastscan
-	variable ret = 1
-	do
-		ret = clearbuffer(fastdac)
-	while (ret!=0)
 
-	for (i=0; i < num; i += 1)
-		FD1D(fastdac, "0", 0, 0, 3000, 1e-3);
-		SetScale/I x 0,3*1.459,"", FastScan;
-		DSPPeriodogram/q/DBR=1000/DTRD/WIN=Hamming/SEGN={1000,0}/DEST=W_Periodogram FastScan
-		doupdate
-	endfor
-end
 
 Function CheckInstrIds(bd6, fastdac, srs1, srs2, srs4, dmm5, magz, magy) //TODO: Make this not fail if instruments are missing. Also should probably just look for global variables
 	variable bd6, fastdac, srs1, srs2, srs4, dmm5, magz, magy
@@ -4974,13 +2706,54 @@ Function CheckInstrIds(bd6, fastdac, srs1, srs2, srs4, dmm5, magz, magy) //TODO:
 end
 
 
+function makecolorful([rev, nlines])
+	variable rev, nlines
+	variable num=0, index=0,colorindex
+	string tracename
+	string list=tracenamelist("",";",1)
+	colortab2wave rainbow
+	wave M_colors
+	variable n=dimsize(M_colors,0), group
+	do
+		tracename=stringfromlist(index, list)
+		if(strlen(tracename)==0)
+			break
+		endif
+		index+=1
+	while(1)
+	num=index-1
+	if( !ParamIsDefault(nlines))
+		group=index/nlines
+	endif
+	index=0
+	do
+		tracename=stringfromlist(index, list)
+		if( ParamIsDefault(nlines))
+			if( ParamIsDefault(rev))
+				colorindex=round(n*index/num)
+			else
+				colorindex=round(n*(num-index)/num)
+			endif
+		else
+			if( ParamIsDefault(rev))
+				colorindex=round(n*ceil((index+1)/nlines)/group)
+			else
+				colorindex=round(n*(group-ceil((index+1)/nlines))/group)
+			endif
+		endif
+		ModifyGraph rgb($tracename)=(M_colors[colorindex][0],M_colors[colorindex][1],M_colors[colorindex][2])
+		index+=1
+	while(index<=num)
+
+end
+
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////// BabyDac /////////////////////////////////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 function AABabyDac()
 end
 
-
+// TODO: Make this work with FastDacs
 function LoadDacs(datnum, [noask])
 	variable datnum, noask
 	variable fileid, i, output, check
@@ -5031,6 +2804,7 @@ function LoadDacs(datnum, [noask])
 
 end
 
+//TODO: Make this work with fastdacs
 function/S GetLabel(channels)
 	string channels
 
@@ -5059,16 +2833,6 @@ end
 ////////////////////////////////////////// Fastdac /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 function AAFastdac()
-end
-
-function clearbuffer(fastdac)
-	variable fastdac
-	string buffer
-	variable ret_count = 0
-	do
-		viRead(fastdac, buffer, 200000, ret_count)
-	while (ret_count > 20000)
-	return ret_count
 end
 
 

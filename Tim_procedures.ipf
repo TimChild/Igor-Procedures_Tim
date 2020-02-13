@@ -53,123 +53,123 @@ function ReadVsTime(delay, [comments]) // Units: s
 	SaveWaves(msg=comments)
 end
 
-function ScanFastDacRepeat(fastdac, startx, finx, channelsx, numptsx, numptsy, delayy, xlabel, [offsetx, comments, RCcutoff, numAverage, notch]) //Units: mV, mT
-	// x-axis is the dac sweep
-	// y-axis is an index
-	// this will sweep: start -> fin, fin -> start, start -> fin, ....
-	// each sweep (whether up or down) will count as 1 y-index
-	// Data processing:
-	// 		- RCcutoff set the lowpass cutoff frequency
-	//		- average set the number of points to average
-	//		- nocth sets the notch frequencie, as a comma seperated list (width is fixed at 5Hz)
-
-	//TODO: Make this work with multiple channels. Each comma separated channel needs a comma separated start and fin string
-
-	variable fastdac, startx, finx, numptsx, numptsy, delayy, offsetx, RCcutoff, numAverage
-	string xlabel, channelsx, comments, notch
-	variable i=0, setpointx, setpointy
-	string x_label, y_label
-
-	if(paramisdefault(comments))
-		comments=""
-	endif
-
-	if( ParamIsDefault(offsetx))
-		offsetx=0
-	endif
-
-	// setup labels
-	x_label = xlabel
-	y_label = "Sweep Num"
-
-	// intialize waves
-	variable starty = 0, finy = numptsy-1, scandirection=0
-	InitializeWaves(startx, finx, numptsx, starty=starty, finy=finy, numptsy=numptsy, x_label=x_label, y_label=y_label, fastdac=1)
-
-	//RampMultipleBD(instrID, channelsx, setpointx, ramprate=rampratex)
-	
-	rampOutputfdac(fastdac, str2num(channelsx), startx)
-	sc_sleep(0.2)
-	string sx, fx  //startx and finx (which will switch back and forth between real startx and finx)
-	do
-		if(mod(i,2)==0)
-			sx = num2str(startx)
-			fx = num2str(finx)
-		else
-			sx = num2str(finx)
-			fx = num2str(startx)
-		endif
-
-		rampOutputfdac(fastdac, str2num(channelsx), str2num(sx))
-		sc_sleep(delayy) // wait at start point
-		fdacRecordValues(fastdac, i, channelsx, sx, fx, numptsx, RCcutoff=RCcutoff, numAverage=numAverage, notch=notch)  //1D sweep either forwards or backwards
-		i+=1
-	while (i<numptsy)
-	SaveWaves(msg=comments, fastdac=1)
-end
-
-
-function ScanFastDAC(fd, start, fin, channels, numpts, ramprate, [comments, nosave, RCcutoff, numAverage, notch]) //Units: mV
-	variable fd, start, fin, numpts, ramprate, nosave, RCcutoff, numAverage
-	string channels, comments, notch
-	string x_label
-
-	if(paramisdefault(comments))
-	comments=""
-	endif
-
-	x_label = GetLabel(channels)
-
-	//Ramp to start
-	rampOutputfdac(fd, str2num(channels), start, ramprate=ramprate)
-	sc_sleep(0.5)
-	InitializeWaves(start, fin, numpts, x_label=x_label, fastdac=1)
-	fdacRecordValues(fd, 0, channels, num2str(start), num2str(fin), numpts, RCcutoff=RCcutoff, numAverage=numAverage, notch=notch)
-	
-	if (nosave == 0)
-  		SaveWaves(msg=comments)
-  	else
-  		dowindow /k SweepControl
-	endif
-
-end
-
-
-function ScanFastDac2D(bd, fd, startx, finx, channelsx, numptsx, starty, finy, channelsy, numptsy, [delayy, ramprate, setchargesensor, comments, RCcutoff, numAverage, notch])
-	//ramprate is how fast to ramp back to beginning of scan
-	variable bd, fd, startx, finx, numptsx, starty, finy, numptsy, delayy, ramprate, setchargesensor, RCcutoff, numAverage
-	string channelsx, channelsy, notch, comments
-
-	variable/g sc_scanstarttime = datetime
-
-	ramprate = paramisdefault(ramprate) ? 5000 : ramprate
-
-	string/g sc_y_label, sc_x_label
-	//sc_x_label = getfdlabel(channelsx)
-	//TODO: Make getfdlabel
-	sc_y_label = getlabel(channelsy)
-
-	InitializeWaves(startx, finx, numptsx, starty=starty, finy=finy, numptsy=numptsy, x_label=sc_x_label, y_label=sc_y_label, fastdac=1)
-
-	variable i, rt
-	rampmultiplebd(bd, channelsy, starty, ramprate=1000)
-	rampOutputfdac(fd, str2num(channelsx), startx, ramprate=ramprate)	
-	i = 0
-	do
-		rampmultiplebd(bd, channelsy, starty+i*((finy-starty)/(numptsy-1)), ramprate=1000)
-
-		if (setchargesensor == 1)
-			rampOutputfdac(fd, str2num(channelsx), round((startx+finx)/2), ramprate=ramprate)
-			//setchargesensorfd(fd, bd)
-			//TODO: Put this back in!
-			rampOutputfdac(fd, str2num(channelsx), startx, ramprate=ramprate)	
-		endif
-		
-		sc_sleep(delayy)
-		fdacRecordValues(fd, i, channelsx, num2str(startx), num2str(finx), numptsx, RCcutoff=RCcutoff, numAverage=numAverage, notch=notch)
-	while (i<numptsy)
-	SaveWaves(msg=comments, fastdac=1)
-end
+//function ScanFastDacRepeat(fastdac, startx, finx, channelsx, numptsx, numptsy, delayy, xlabel, [offsetx, comments, RCcutoff, numAverage, notch]) //Units: mV, mT
+//	// x-axis is the dac sweep
+//	// y-axis is an index
+//	// this will sweep: start -> fin, fin -> start, start -> fin, ....
+//	// each sweep (whether up or down) will count as 1 y-index
+//	// Data processing:
+//	// 		- RCcutoff set the lowpass cutoff frequency
+//	//		- average set the number of points to average
+//	//		- nocth sets the notch frequencie, as a comma seperated list (width is fixed at 5Hz)
+//
+//	//TODO: Make this work with multiple channels. Each comma separated channel needs a comma separated start and fin string
+//
+//	variable fastdac, startx, finx, numptsx, numptsy, delayy, offsetx, RCcutoff, numAverage
+//	string xlabel, channelsx, comments, notch
+//	variable i=0, setpointx, setpointy
+//	string x_label, y_label
+//
+//	if(paramisdefault(comments))
+//		comments=""
+//	endif
+//
+//	if( ParamIsDefault(offsetx))
+//		offsetx=0
+//	endif
+//
+//	// setup labels
+//	x_label = xlabel
+//	y_label = "Sweep Num"
+//
+//	// intialize waves
+//	variable starty = 0, finy = numptsy-1, scandirection=0
+//	InitializeWaves(startx, finx, numptsx, starty=starty, finy=finy, numptsy=numptsy, x_label=x_label, y_label=y_label, fastdac=1)
+//
+//	//RampMultipleBD(instrID, channelsx, setpointx, ramprate=rampratex)
+//	
+//	rampOutputfdac(fastdac, str2num(channelsx), startx)
+//	sc_sleep(0.2)
+//	string sx, fx  //startx and finx (which will switch back and forth between real startx and finx)
+//	do
+//		if(mod(i,2)==0)
+//			sx = num2str(startx)
+//			fx = num2str(finx)
+//		else
+//			sx = num2str(finx)
+//			fx = num2str(startx)
+//		endif
+//
+//		rampOutputfdac(fastdac, str2num(channelsx), str2num(sx))
+//		sc_sleep(delayy) // wait at start point
+//		fdacRecordValues(fastdac, i, channelsx, sx, fx, numptsx, RCcutoff=RCcutoff, numAverage=numAverage, notch=notch)  //1D sweep either forwards or backwards
+//		i+=1
+//	while (i<numptsy)
+//	SaveWaves(msg=comments, fastdac=1)
+//end
+//
+//
+//function ScanFastDAC(fd, start, fin, channels, numpts, ramprate, [comments, nosave, RCcutoff, numAverage, notch]) //Units: mV
+//	variable fd, start, fin, numpts, ramprate, nosave, RCcutoff, numAverage
+//	string channels, comments, notch
+//	string x_label
+//
+//	if(paramisdefault(comments))
+//	comments=""
+//	endif
+//
+//	x_label = GetLabel(channels)
+//
+//	//Ramp to start
+//	rampOutputfdac(fd, str2num(channels), start, ramprate=ramprate)
+//	sc_sleep(0.5)
+//	InitializeWaves(start, fin, numpts, x_label=x_label, fastdac=1)
+//	fdacRecordValues(fd, 0, channels, num2str(start), num2str(fin), numpts, RCcutoff=RCcutoff, numAverage=numAverage, notch=notch)
+//	
+//	if (nosave == 0)
+//  		SaveWaves(msg=comments)
+//  	else
+//  		dowindow /k SweepControl
+//	endif
+//
+//end
+//
+//
+//function ScanFastDac2D(bd, fd, startx, finx, channelsx, numptsx, starty, finy, channelsy, numptsy, [delayy, ramprate, setchargesensor, comments, RCcutoff, numAverage, notch])
+//	//ramprate is how fast to ramp back to beginning of scan
+//	variable bd, fd, startx, finx, numptsx, starty, finy, numptsy, delayy, ramprate, setchargesensor, RCcutoff, numAverage
+//	string channelsx, channelsy, notch, comments
+//
+//	variable/g sc_scanstarttime = datetime
+//
+//	ramprate = paramisdefault(ramprate) ? 5000 : ramprate
+//
+//	string/g sc_y_label, sc_x_label
+//	//sc_x_label = getfdlabel(channelsx)
+//	//TODO: Make getfdlabel
+//	sc_y_label = getlabel(channelsy)
+//
+//	InitializeWaves(startx, finx, numptsx, starty=starty, finy=finy, numptsy=numptsy, x_label=sc_x_label, y_label=sc_y_label, fastdac=1)
+//
+//	variable i, rt
+//	rampmultiplebd(bd, channelsy, starty, ramprate=1000)
+//	rampOutputfdac(fd, str2num(channelsx), startx, ramprate=ramprate)	
+//	i = 0
+//	do
+//		rampmultiplebd(bd, channelsy, starty+i*((finy-starty)/(numptsy-1)), ramprate=1000)
+//
+//		if (setchargesensor == 1)
+//			rampOutputfdac(fd, str2num(channelsx), round((startx+finx)/2), ramprate=ramprate)
+//			//setchargesensorfd(fd, bd)
+//			//TODO: Put this back in!
+//			rampOutputfdac(fd, str2num(channelsx), startx, ramprate=ramprate)	
+//		endif
+//		
+//		sc_sleep(delayy)
+//		fdacRecordValues(fd, i, channelsx, num2str(startx), num2str(finx), numptsx, RCcutoff=RCcutoff, numAverage=numAverage, notch=notch)
+//	while (i<numptsy)
+//	SaveWaves(msg=comments, fastdac=1)
+//end
 
 
 //function ScanFastDac2DLine(bd, fd, startx, finx, channelsx, numptsx, x_label, starty, finy, channelsy, numptsy, delayy, width, [comments, rampratex, rampratey, x1, y1, x2, y2, linecut, followtolerance, startrange])//Units: mV
@@ -2805,19 +2805,33 @@ function LoadDacs(datnum, [noask])
 end
 
 //TODO: Make this work with fastdacs
-function/S GetLabel(channels)
+function/S GetLabel(channels, [fastdac])
 	string channels
-
-	variable nChannels, i
+	variable fastdac
+	
+	variable i=0
+	variable nChannels
 	string channel, buffer, xlabelfriendly = ""
 	wave/t dacvalstr
+	wave/t fdacvalstr
 	nChannels = ItemsInList(channels, ",")
 	for(i=0;i<nChannels;i+=1)
 		channel = StringFromList(i, channels, ",")
-		buffer = dacvalstr[str2num(channel)][3] // Grab name from dacvalstr
-		if (cmpstr(buffer, "") == 0)
-			buffer = "BD"+channel
+		
+		if (fastdac == 0)
+			buffer = dacvalstr[str2num(channel)][3] // Grab name from dacvalstr
+			if (cmpstr(buffer, "") == 0)
+				buffer = "BD"+channel
+			endif
+		elseif (fastdac == 1)
+			buffer = fdacvalstr[str2num(channel)][3] // Grab name from fdacvalstr
+			if (cmpstr(buffer, "") == 0)
+				buffer = "FD"+channel
+			endif
+		else
+			abort "\"GetLabel\": Fastdac flag must be 0 or 1"
 		endif
+		
 		if (cmpstr(xlabelfriendly, "") != 0)
 			buffer = ", "+buffer
 		endif

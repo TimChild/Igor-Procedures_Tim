@@ -87,7 +87,7 @@ end
 //	InitializeWaves(startx, finx, numptsx, starty=starty, finy=finy, numptsy=numptsy, x_label=x_label, y_label=y_label, fastdac=1)
 //
 //	//RampMultipleBD(instrID, channelsx, setpointx, ramprate=rampratex)
-//	
+//
 //	rampOutputfdac(fastdac, str2num(channelsx), startx)
 //	sc_sleep(0.2)
 //	string sx, fx  //startx and finx (which will switch back and forth between real startx and finx)
@@ -125,7 +125,7 @@ end
 //	sc_sleep(0.5)
 //	InitializeWaves(start, fin, numpts, x_label=x_label, fastdac=1)
 //	fdacRecordValues(fd, 0, channels, num2str(start), num2str(fin), numpts, RCcutoff=RCcutoff, numAverage=numAverage, notch=notch)
-//	
+//
 //	if (nosave == 0)
 //  		SaveWaves(msg=comments)
 //  	else
@@ -153,7 +153,7 @@ end
 //
 //	variable i, rt
 //	rampmultiplebd(bd, channelsy, starty, ramprate=1000)
-//	rampOutputfdac(fd, str2num(channelsx), startx, ramprate=ramprate)	
+//	rampOutputfdac(fd, str2num(channelsx), startx, ramprate=ramprate)
 //	i = 0
 //	do
 //		rampmultiplebd(bd, channelsy, starty+i*((finy-starty)/(numptsy-1)), ramprate=1000)
@@ -162,9 +162,9 @@ end
 //			rampOutputfdac(fd, str2num(channelsx), round((startx+finx)/2), ramprate=ramprate)
 //			//setchargesensorfd(fd, bd)
 //			//TODO: Put this back in!
-//			rampOutputfdac(fd, str2num(channelsx), startx, ramprate=ramprate)	
+//			rampOutputfdac(fd, str2num(channelsx), startx, ramprate=ramprate)
 //		endif
-//		
+//
 //		sc_sleep(delayy)
 //		fdacRecordValues(fd, i, channelsx, num2str(startx), num2str(finx), numptsx, RCcutoff=RCcutoff, numAverage=numAverage, notch=notch)
 //	while (i<numptsy)
@@ -971,13 +971,13 @@ function Display3VarScans(wavenamestr, [v1, v2, v3, uselabels, usecolorbar, diff
 		//	make/o/t varlabels = {"CSR", "CStotal", "SDP"}
 		//	make/o/t axislabels = {"SDL", "SDR"} //y, x
 		//	///////////////////////////////////////////////////////////////////////////////
-			
+
 		//	///////////////////////////////////////////////////////////////////////////////
 
 	else
 		switch (scanset)
 			case 1:
-				// Right side of NikV2 15th feb 2020 
+				// Right side of NikV2 15th feb 2020
 				datstart = 88
 				v1gmax = 5; v2gmax = 5; v3gmax = 2 //Have to make global to use NumVarOrDefault...
 				v1start = -100; v2start = -0; v3start = -300
@@ -1563,7 +1563,6 @@ function graddif(data, vertical, [threshlow, startx, finx, starty, finy]) // ver
 		endfor
 	endfor
 	//display; appendimage fitwave
-
 end
 
 
@@ -2831,7 +2830,7 @@ function LoadDacs(datnum, [noask])
 
 	HDF5CloseFile fileid
 
-	
+
 	wave/t loadeddacvalstr
 	wave/t loadedfdacvalstr
 	wave/t old_dacvalstr
@@ -2851,7 +2850,7 @@ function LoadDacs(datnum, [noask])
 		// Just used same init window here because I didn't want to make a new one.
 	endif
 
-	
+
 
 	if (bd_answer == -1 || noask == 1)
 		// open temporary connection to babyDAC
@@ -2879,11 +2878,11 @@ function LoadDacs(datnum, [noask])
 
 end
 
-//TODO: Make this work with fastdacs
+
 function/S GetLabel(channels, [fastdac])
 	string channels
 	variable fastdac
-	
+
 	variable i=0
 	variable nChannels
 	string channel, buffer, xlabelfriendly = ""
@@ -2892,7 +2891,7 @@ function/S GetLabel(channels, [fastdac])
 	nChannels = ItemsInList(channels, ",")
 	for(i=0;i<nChannels;i+=1)
 		channel = StringFromList(i, channels, ",")
-		
+
 		if (fastdac == 0)
 			buffer = dacvalstr[str2num(channel)][3] // Grab name from dacvalstr
 			if (cmpstr(buffer, "") == 0)
@@ -2906,7 +2905,7 @@ function/S GetLabel(channels, [fastdac])
 		else
 			abort "\"GetLabel\": Fastdac flag must be 0 or 1"
 		endif
-		
+
 		if (cmpstr(xlabelfriendly, "") != 0)
 			buffer = ", "+buffer
 		endif

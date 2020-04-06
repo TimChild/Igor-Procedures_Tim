@@ -5,6 +5,92 @@ function AAMeasurementUtility()
 end
 
 
+function CorrectChargeSensor([bd, bdchannel, dmmid, fd, fdchannel, fadcID, fadcchannel, i, check, natarget, direction])
+//Corrects the charge sensor by ramping the CSQ in 1mV steps (direction changes the direction it tries to correct in)
+	variable bd, dmmid, fd, fadcID, fadcchannel, i, check, natarget, bdchannel, fdchannel, direction
+	variable cdac, cfdac, current, nextdac
+	wave/T dacvalstr
+	wave/T fdacvalstr
+
+	natarget = paramisdefault(natarget) ? 0.8 : natarget
+	direction = paramisdefault(direction) ? 1 : direction
+
+	if ((paramisdefault(bd) && paramisdefault(fd)) || !paramisdefault(bd) && !paramisdefault(fd))
+		abort "Must provide either babydac OR fastdac id"
+	elseif  ((paramisdefault(dmmid) && paramisdefault(fadcID)) || !paramisdefault(fadcID) && !paramisdefault(dmmid))
+		abort "Must provide either dmmid OR fadcchannel"
+	elseif ((!paramisdefault(bd) && paramisDefault(bdchannel)) || (!paramisdefault(fd) && paramisDefault(fdchannel)))
+		abort "Must provide the channel to change for the babydac or fastdac"
+	elseif (!paramisdefault(fadcid) && paramisdefault(fadcchannel))
+		abort "Must provide fdadcID if using fadc to read current"
+	elseif (!paramisdefault(fd) && paramisdefault(fdchannel))
+		abort "Must provide fdchannel if using fd"
+	elseif (!paramisdefault(bd) && paramisdefault(bdchannel))
+		abort "Must provide bdchannel if using bd"
+	endif
+
+	sc_openinstrconnections(0)
+
+	//get current
+	if (!paramisdefault(dmmid))
+		current = read34401A(dmmid)
+	else
+		current = getfadcChannel(fd,fadcchannel)
+	endif
+
+	if (abs(current-natarget) > 0.01)
+		do
+
+			//get cdac
+			if (!paramisdefault(bd))
+				cdac = str2num(dacvalstr[bdchannel][1])
+			else
+				cdac = str2num(fdacvalstr[fdchannel][1])
+			endif
+
+			if (current < nAtarget)
+				nextdac = cdac+0.3*direction
+			else
+				nextdac = cdac-0.3*direction
+			endif
+
+			if (check==0) //no user input
+				if (-800 < nextdac && nextdac < -100) //Prevent it doing something crazy
+					if (!paramisdefault(bd))
+						rampmultiplebd(bd, num2str(bdchannel), nextdac)
+					else
+						rampoutputfdac(fd, fdchannel, nextdac)
+					endif
+				else
+					abort "Failed to correct charge sensor to target current"
+				endif
+			else //ask for user input
+				doAlert/T="About to change DAC" 1, "Scan wants to ramp DAC to " + num2str(nextdac) +"mV, is that OK?"
+				if (V_flag == 1)
+					if (!paramisdefault(bd))
+						rampmultiplebd(bd, num2str(bdchannel), nextdac)
+					else
+						rampoutputfdac(fd, fdchannel, nextdac)
+					endif
+				else
+					abort "Computer tried to do bad thing"
+				endif
+			endif
+			//get current
+			if (!paramisdefault(dmmid))
+				current = read34401A(dmmid)
+			else
+				current = getfadcChannel(fd,fadcchannel)
+			endif
+		while (abs(current-nAtarget) > 0.005)
+
+		if (!paramisDefault(i))
+			print "Ramped to " + num2str(nextdac) + "mV, at line " + num2str(i)
+		endif
+	endif
+end
+
+
 function get_numpts_from_sweeprate(fd, start, fin, sweeprate)
 /// Convert sweeprate in mV/s to numptsx for fdacrecordvalues
 	variable fd, start, fin, sweeprate

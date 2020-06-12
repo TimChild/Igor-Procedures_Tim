@@ -1,4 +1,4 @@
-////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 //////////////////////////////// Scans /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 function AAScans()
@@ -269,7 +269,7 @@ end
 function ScanFastDAC(instrID, start, fin, channels, [numpts, sweeprate, ramprate, delay, y_label, comments, RCcutoff, numAverage, notch, nosave]) //Units: mV
 	// sweep one or more FastDac channels from start to fin using either numpnts or sweeprate /mV/s
 	// Note: ramprate is for ramping to beginning of scan ONLY
-	// Note: Delay is the wait after rampint to start position ONLY
+	// Note: Delay is the wait after rampoint to start position ONLY
 	// channels should be a comma-separated string ex: "0,4,5"
 	variable instrID, start, fin, numpts, sweeprate, ramprate, delay, RCcutoff, numAverage, nosave
 	string channels, comments, notch, y_label
@@ -303,7 +303,7 @@ function ScanFastDAC(instrID, start, fin, channels, [numpts, sweeprate, ramprate
 
 	// Ramp to startx and format inputs for fdacRecordValues
 	string starts = "", fins = ""
-	RampMultipleFD(instrID, channels, start)
+	RampMultipleFDac(instrID, channels, start)
 	fd_format_setpoints(start, fin, channels, starts, fins)
 
 	// Let gates settle
@@ -330,12 +330,12 @@ function ScanFastDAC(instrID, start, fin, channels, [numpts, sweeprate, ramprate
 end
 
 
-function ScanFastDAC2D(fdID, startx, finx, channelsx, starty, finy, channelsy, numptsy, [numptsx, sweeprate, bdID, rampratex, rampratey, delayy, comments, RCcutoff, numAverage, notch, nosave]) //Units: mV
+function ScanFastDAC2D(fdID, startx, finx, channelsx, starty, finy, channelsy, numptsy, [numpts, sweeprate, bdID, rampratex, rampratey, delayy, comments, RCcutoff, numAverage, notch, nosave])
 	// 2D Scan for FastDAC only OR FastDAC on fast axis and BabyDAC on slow axis
 	// Note: Must provide numptsx OR sweeprate in optional parameters instead
 	// Note: To ramp with babyDAC on slow axis provide the BabyDAC variable in bdID
 	// Note: channels should be a comma-separated string ex: "0,4,5"
-	variable fdID, startx, finx, sweeprate, starty, finy, numptsy, bdID, rampratex, rampratey, delayy, ignore_positive, RCcutoff, numAverage, nosave
+	variable fdID, startx, finx, starty, finy, numptsy, numpts, sweeprate, bdID, rampratex, rampratey, delayy, RCcutoff, numAverage, nosave
 	string channelsx, channelsy, comments, notch
 	variable i=0, j=0
 
@@ -347,7 +347,7 @@ function ScanFastDAC2D(fdID, startx, finx, channelsx, starty, finy, channelsy, n
 	elseif (!ParamIsDefault(numpts)) // If numpts provided, just use that
 		numpts = numpts
 	elseif (!ParamIsDefault(sweeprate)) // If sweeprate provided calculate numpts required
-		numpts = get_numpts_from_sweeprate(fdID, start, fin, sweeprate)
+		numpts = get_numpts_from_sweeprate(fdID, startx, finx, sweeprate)
 	endif
 
 	// Reconnect instruments
@@ -357,7 +357,7 @@ function ScanFastDAC2D(fdID, startx, finx, channelsx, starty, finy, channelsy, n
 	nvar fd_ramprate
 	rampratex = paramisdefault(rampratex) ? fd_ramprate : rampratex
 	rampratey = ParamIsDefault(rampratey) ? fd_ramprate : rampratey
-	delay = ParamIsDefault(delay) ? 0.5 : delay
+	delayy = ParamIsDefault(delayy) ? 0.5 : delayy
 	if (paramisdefault(notch))
 		notch = ""
 	endif
@@ -367,21 +367,22 @@ function ScanFastDAC2D(fdID, startx, finx, channelsx, starty, finy, channelsy, n
 
 	// Ramp to startx and format inputs for fdacRecordValues
 	string startxs = "", finxs = ""
-	RampMultipleFD(instrID, channelsx, startx)
+	RampMultipleFDac(fdID, channelsx, startx)
 	fd_format_setpoints(startx, finx, channelsx, startxs, finxs)
 
 	if (ParamIsDefault(bdID)) // If using FastDAC on slow axis
 		string startys = "", finys = ""
-		RampMultipleFD(instrID, channelsy, starty)
+		RampMultipleFDac(fdID, channelsy, starty)
 		fd_format_setpoints(starty, finy, channelsy, startys, finys)
 	elseif (!ParamIsDefault(bdID)) // If using BabyDAC on slow axis
-		RampMultipleBD(bdID, channelsy, starty, ramprate=ramprate)
+		RampMultipleBD(bdID, channelsy, starty, ramprate=rampratey)
 	endif
 
 	// Let gates settle
 	sc_sleep(delayy)
 
 	// Get Labels for waves
+	string x_label, y_label
 	x_label = GetLabel(channelsx, fastdac=1)
 	if (ParamIsDefault(bdID)) // If using FastDAC on slow axis
 		y_label = GetLabel(channelsy, fastdac=1)
@@ -390,7 +391,7 @@ function ScanFastDAC2D(fdID, startx, finx, channelsx, starty, finy, channelsy, n
 	endif
 
 	// Make waves
-	InitializeWaves(startx, finx, numptsx, starty=starty, finy=finy, numptsy=numptsy, x_label=x_label, y_label= y_label, fastdac=1)
+	InitializeWaves(startx, finx, numpts, starty=starty, finy=finy, numptsy=numptsy, x_label=x_label, y_label= y_label, fastdac=1)
 
 	// Main measurement loop
 	variable setpointy, channely
@@ -398,13 +399,13 @@ function ScanFastDAC2D(fdID, startx, finx, channelsx, starty, finy, channelsy, n
 		// Ramp slow axis
 		setpointy = starty + (i*(finy-starty)/(numptsy-1))
 		if (ParamIsDefault(bdID)) // If using FastDAC on slow axis
-			RampMultipleFD(fdID, channelsy, setpointy, ramprate=ramprate)
+			RampMultipleFDac(fdID, channelsy, setpointy, ramprate=rampratey)
 		elseif (!ParamIsDefault(bdID)) // If using BabyDAC on slow axislabels
-			RampMultipleBD(bdID, channelsy, setpointy, ramprate=ramprate)
+			RampMultipleBD(bdID, channelsy, setpointy, ramprate=rampratey)
 		endif
 
 		// Record fast axis
-		fdacRecordValues(fdID,i,channelsx,startxs,finxs,numptsx,delay=delayy,ramprate=ramprate,RCcutoff=RCcutoff,numAverage=numAverage,notch=notch)
+		fdacRecordValues(fdID,i,channelsx,startxs,finxs,numpts,delay=delayy,ramprate=rampratex,RCcutoff=RCcutoff,numAverage=numAverage,notch=notch)
 	endfor
 
 	// Save by default
@@ -416,34 +417,27 @@ function ScanFastDAC2D(fdID, startx, finx, channelsx, starty, finy, channelsy, n
 end
 
 
-function ScanfastdacRepeat(instrID, start, fin, channels, sweeprate, numptsy, [numptsx, sweeprate, delayy, ramprate, alternate, comments, RCcutoff, numAverage, notch, nosave])
+function ScanfastdacRepeat(instrID, start, fin, channels, numptsy, [numptsx, sweeprate, delayy, ramprate, alternate, comments, RCcutoff, numAverage, notch, nosave])
 	// 1D repeat scan for FastDAC
 	// Note: to alternate scan direction set alternate=1
 	// Note: Ramprate is only for ramping gates between scans
-	variable instrID, start, fin, numptsy, numptsx, sweeprate, delayy, ramprate, RCcutoff, numAverage, alternate, nosave,
+	variable instrID, start, fin, numptsy, numptsx, sweeprate, delayy, ramprate, alternate, RCcutoff, numAverage, nosave
 	string channels, comments, notch
-	string x_label
 	variable i=0, j=0
-
-	if (!paramisdefault(alternate))
-		abort "Not implemented alternating direction scans yet"
-	endif
-
-
-
-	// Chose which input to use for numpts of scan
-	if (ParamIsDefault(numpts) && ParamIsDefault(sweeprate))
-		abort "ERROR[ScanFastDac]: User must provide either numpts OR sweeprate for scan [neither provided]"
-	elseif (!ParamIsDefault(numpts) && !ParamIsDefault(sweeprate))
-		abort "ERROR[ScanFastDac]: User must provide either numpts OR sweeprate for scan [both provided]"
-	elseif (!ParamIsDefault(numpts)) // If numpts provided, just use that
-		numpts = numpts
-	elseif (!ParamIsDefault(sweeprate)) // If sweeprate provided calculate numpts required
-		numpts = get_numpts_from_sweeprate(fdID, start, fin, sweeprate)
-	endif
 
 	// Reconnect instruments
 	sc_openinstrconnections(0)
+
+	// Chose which input to use for numpts of scan
+	if (ParamIsDefault(numptsx) && ParamIsDefault(sweeprate))
+		abort "ERROR[ScanFastDac]: User must provide either numpts OR sweeprate for scan [neither provided]"
+	elseif (!ParamIsDefault(numptsx) && !ParamIsDefault(sweeprate))
+		abort "ERROR[ScanFastDac]: User must provide either numpts OR sweeprate for scan [both provided]"
+	elseif (!ParamIsDefault(numptsx)) // If numpts provided, just use that
+		numptsx = numptsx
+	elseif (!ParamIsDefault(sweeprate)) // If sweeprate provided calculate numpts required
+		numptsx = get_numpts_from_sweeprate(instrID, start, fin, sweeprate)
+	endif
 
 	// Set defaults
 	nvar fd_ramprate
@@ -458,37 +452,29 @@ function ScanfastdacRepeat(instrID, start, fin, channels, sweeprate, numptsy, [n
 
 	// Ramp to startx and format inputs for fdacRecordValues
 	string starts = "", fins = ""
-	RampMultipleFD(instrID, channels, start)
+	RampMultipleFDac(instrID, channels, start)
 	fd_format_setpoints(start, fin, channels, starts, fins)
 
 	// Let gates settle
 	sc_sleep(delayy)
 
 	// Get labels for waves
-	if (paramisdefault(x_label))
-		x_label = GetLabel(channels, fastdac=1)
-	endif
-	if (paramisdefault(y_label))
-		y_label = "Repeats"
-	endif
+	string x_label, y_label
+	x_label = GetLabel(channels, fastdac=1)
+	y_label = "Repeats"
 
 	// Make waves
-	InitializeWaves(start, fin, numpts, x_label=x_label, y_label=y_label, starty=starty, finy=finy, numptsy=numy, fastdac=1)
+	InitializeWaves(start, fin, numptsx, x_label=x_label, y_label=y_label, starty=1, finy=numptsy, numptsy=numptsy, fastdac=1)
 
 	// Main measurement loop
 	variable d=1
-	for (j=0; j<numy; j++)
-		if (alternate!=0) // If want to alternate scan scandirection
-			if (d>0)
-				fd_format_setpoints(start, fin, channels, starts, fins) // Put into starts and fins
-			elseif (d<0)
-				fd_format_setpoints(fin, start, channels, starts, fins) // Put into starts and fins
-			endif
-			d = d*-1
-		endif
+	for (j=0; j<numptsy; j++)
 
 		// Record values for 1D sweep
-		fdacRecordValues(instrID,j,channels,starts,fins,numpts,delay=delayy, ramprate=ramprate,RCcutoff=RCcutoff,numAverage=numAverage,notch=notch)
+		fdacRecordValues(instrID,j,channels,starts,fins,numptsx,delay=delayy, ramprate=ramprate,RCcutoff=RCcutoff,numAverage=numAverage,notch=notch, direction=d)
+		if (alternate!=0) // If want to alternate scan scandirection for next row
+			d = d*-1
+		endif
 
 	endfor
 	// Save by default
@@ -559,7 +545,7 @@ function steptempscanSomething()
 	while ( i<numpnts(targettemps) )
 
 	// kill temperature control
-	turnoffLS370MCheater(ls370)
+//	turnoffLS370MCheater(ls370)
 	resetLS370exclusivereader(ls370)
 	sc_sleep(60.0*30)
 

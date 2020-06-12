@@ -95,12 +95,7 @@ function get_numpts_from_sweeprate(fd, start, fin, sweeprate)
 /// Convert sweeprate in mV/s to numptsx for fdacrecordvalues
 	variable fd, start, fin, sweeprate
 	variable numpts, adcspeed, numadc = 0, i
-	wave fadcattr
-	for (i=0; i<dimsize(fadcattr, 1)-1; i++) // Count how many ADCs are being measured
-		if (fadcattr[i][2] == 48)
-			numadc++
-		endif
-	endfor
+	numadc = getNumFADC()
 	adcspeed = getfadcspeed(fd)
 	numpts = round(abs(fin-start)*(adcspeed/numadc)/sweeprate)   // distance * steps per second / sweeprate
 	return numpts

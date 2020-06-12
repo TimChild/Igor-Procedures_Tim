@@ -20,7 +20,7 @@ function SetupStandardEntropy([printchanges, keepphase])
 
 	variable temp
 	string tempstr
-	CheckInstrIds(bd6, fastdac, srs1, srs2, srs4, dmm5, magz, magy)
+//	CheckInstrIds(bd6, fastdac, srs1, srs2, srs4, dmm5, magz, magy)
 	temp = getsrsamplitude(srs1)
 	if (temp != SRSout)
 		if (printchanges)

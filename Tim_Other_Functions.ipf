@@ -4,6 +4,38 @@
 function AAOtherFunctions()
 end
 
+function saveLogsOnly([msg, save_experiment])
+	string msg
+	variable save_experiment // Default: Do not save experiment for just this
+	
+	nvar filenum
+	
+	if (paramisdefault(msg))
+		msg = "SaveLogsOnly"
+	endif
+	
+	initSaveFiles(msg=msg, logs_only=1) // Saves logs here, and adds Logs_Only attr to root group of HDF	
+	closeSaveFiles()	
+	// increment filenum
+	filenum+=1
+
+	nvar sc_save_time
+	if(save_experiment==1 & (datetime-sc_save_time)>60)
+		// save if sc_saveexperiment=1
+		// and if more than 1 minutes has elapsed since previous saveExp
+		// if the sweep was aborted sc_saveexperiment=0 before you get here
+		saveExp()
+		sc_save_time = datetime
+	endif
+	
+	// check if a path is defined to backup data
+	if(sc_checkBackup())
+		// copy data to server mount point
+		sc_copyNewFiles(filenum, save_experiment=save_experiment)
+	endif
+end
+
+
 function udh5()
 
 	string infile = wavelist("*",";","") // get wave list

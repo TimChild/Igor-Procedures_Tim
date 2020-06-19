@@ -5,6 +5,14 @@ function AAMeasurementUtility()
 end
 
 
+function loadFromHDF(datnum, [no_check])
+	variable datnum, no_check
+	
+//	bdLoadFromHDF(datnum, no_check = no_check)
+	fdLoadFromHDF(datnum, no_check = no_check)
+end
+
+
 function CorrectChargeSensor([bd, bdchannel, dmmid, fd, fdchannel, fadcID, fadcchannel, i, check, natarget, direction])
 //Corrects the charge sensor by ramping the CSQ in 1mV steps (direction changes the direction it tries to correct in)
 	variable bd, dmmid, fd, fadcID, fadcchannel, i, check, natarget, bdchannel, fdchannel, direction

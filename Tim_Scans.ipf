@@ -303,7 +303,8 @@ function ScanFastDAC(instrID, start, fin, channels, [numpts, sweeprate, ramprate
 
 	// Ramp to startx and format inputs for fdacRecordValues
 	string starts = "", fins = ""
-	RampMultipleFDac(instrID, channels, start)
+	// TODO: Should put checks here on x, y lims? 
+	//RampMultipleFDac(instrID, channels, start)
 	fd_format_setpoints(start, fin, channels, starts, fins)
 
 	// Let gates settle

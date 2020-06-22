@@ -4,6 +4,31 @@
 function AAOtherFunctions()
 end
 
+
+////// JSON General //////
+
+
+function print_keys(jsonID, path)
+	variable jsonID
+	string path
+	wave/t ans = JSON_getkeys(jsonID, path)
+	print ans
+end
+
+
+
+
+/////////////////////////////
+
+structure sc_global_vars // NOTE: Still have to declare as nvar etc when using ... so defeats the purpose really...
+	// Structure to make accessing common sc global variables easier and cleaner
+   nvar sc_is2d, sc_startx, sc_starty, sc_finx, sc_finy, sc_numptsx, sc_numptsy
+   nvar sc_abortsweep, sc_pause, sc_scanstarttime
+   wave fadcattr
+   wave/T fdacvalstr, facdvalstr
+endstructure
+
+
 function saveLogsOnly([msg, save_experiment])
 	string msg
 	variable save_experiment // Default: Do not save experiment for just this
@@ -111,3 +136,13 @@ function makecolorful([rev, nlines])
 		index+=1
 	while(index<=num)
 end
+
+
+function print_eta(S)
+	// Useful to put in 2D babydac scans which can be long. Will print an eta
+	struct BD_ScanVars &S
+	variable eta
+	Eta = (S.delayx+0.08)*S.numptsx*S.numptsy+S.delayy*S.numptsy+S.numptsy*abs(S.finx-S.startx)/(S.rampratex/3)  //0.06 for time to measure from lockins etc, Ramprate/3 because it is wrong otherwise
+	Print "Estimated time for scan = " + num2str(eta/60) + "mins, ETA = " + secs2time(datetime+eta, 0)	
+end
+	

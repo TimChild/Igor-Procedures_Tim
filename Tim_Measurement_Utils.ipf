@@ -162,17 +162,6 @@ function CorrectChargeSensor([bd, bdchannel, dmmid, fd, fdchannel, fadcID, fadcc
 end
 
 
-function get_numpts_from_sweeprate(fd, start, fin, sweeprate)
-/// Convert sweeprate in mV/s to numptsx for fdacrecordvalues
-	variable fd, start, fin, sweeprate
-	variable numpts, adcspeed, numadc = 0, i
-	numadc = getNumFADC()
-	adcspeed = getfadcspeed(fd)
-	numpts = round(abs(fin-start)*(adcspeed/numadc)/sweeprate)   // distance * steps per second / sweeprate
-	return numpts
-end
-
-
 function WaitTillTempStable(instrID, targetTmK, times, delay, err)
 	// instrID is the lakeshore controller ID
 	// targetmK is the target temperature in mK

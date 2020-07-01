@@ -8,54 +8,6 @@
 ////////////////////////////// FD/AWG ///////////////////////////////////
 /////////////////////////////////////////////////////////////////////////
 
-function Set_multi_square_wave(instrID, v0, vP, vM, v0len, vPlen, vMlen, wave_num)
-   // Wrapper around fdAWG_add_wave to make square waves with form v0, +vP, v0, -vM (useful for Tim's Entropy)
-   // To make simple square wave set length of unwanted setpoints to zero.
-   variable instrID, v0, vP, vM, v0len, vPlen, vMlen, wave_num  // lens in seconds
-
-   // TODO: need to make a warning that if changing ADC frequency that AWG_frequency changes
-
-   // put into wave to make it easier to work with
-   make/o/free sps = {v0, vP, vM}
-   make/o/free lens = {v0len, vPlen, vMlen}
-
-   // Sanity check on period
-   // Note: limit checks happen in AWG_RAMP  // TODO: put that check in
-   if (sum(lens) > 1)
-      string msg
-      sprintf msg "Do you really want to make a square wave with period %.3gs?", sum(lens)
-      variable ans = ask_user(msg, type=1)
-      if (ans == 2)
-         abort "User aborted"
-      endif
-   endif
-
-   // make wave to store setpoints/sample_lengths
-   make/o/free/n=(-1, 2) awg_sqw  // TODO: check dims of wave
-
-   variable samplingFreq = getFADCspeed(instrID)  // Gets sampling rate of FD (Note: NOT measureFreq here)
-   variable numSamples = 0
-
-   variable i=0, j=0
-   for(i=0;i<numpnts(sps);i++)
-      if(lens[i] != 0)  // Only add to wave if duration is non-zero
-         numSamples = round(lens[i]*samplingFreq)  // Convert to # samples
-         if(numSamples == 0)  // Prevent adding zero length setpoint
-            abort "ERROR[Set_multi_square_wave]: trying to add setpoint with zero length, duration too short for sampleFreq"
-         endif
-         awg_sqw[j] = {sps[i], numSamples}
-         j++
-      endif
-   endfor
-
-   if(numpnts(awg_sqw) == 0)
-      abort "ERROR[Set_multi_square_wave]: No setpoints added to awg_sqw"
-   endif
-
-   fdAWG_clear_wave(instrID, wave_num)
-   fdAWG_add_wave(instrID, wave_num, awg_sqw)
-   printf "Set square wave on AWG_wave%d", wave_num
-end
 
 
 

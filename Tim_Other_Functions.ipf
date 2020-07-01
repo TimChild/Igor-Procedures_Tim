@@ -22,6 +22,10 @@ end
 
 structure sc_global_vars // NOTE: Still have to declare as nvar etc when using ... so defeats the purpose really...
 	// Structure to make accessing common sc global variables easier and cleaner
+
+	// USE STRUCTFILL!! 
+	//	StructFill
+
    nvar sc_is2d, sc_startx, sc_starty, sc_finx, sc_finy, sc_numptsx, sc_numptsy
    nvar sc_abortsweep, sc_pause, sc_scanstarttime
    wave fadcattr
@@ -146,3 +150,8 @@ function print_eta(S)
 	Print "Estimated time for scan = " + num2str(eta/60) + "mins, ETA = " + secs2time(datetime+eta, 0)	
 end
 	
+	
+//	// Check sum of sampleLens isn't going to be longer than 1s
+//	if(sum(samples)/measureFreq > 1) // If period of wave is greater than 1s warn  // TODO: Make this actually sum just the sampleLens then * by measureFreq (or sampleFreq?)
+//		printf "WARNING[fdAWG_check_AW]: Period of AW is %.1fs, continuing anyway"
+//	endif

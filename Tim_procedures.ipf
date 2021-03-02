@@ -53,123 +53,123 @@ function ReadVsTime(delay, [comments]) // Units: s
 	SaveWaves(msg=comments)
 end
 
-function ScanFastDacRepeat(fastdac, startx, finx, channelsx, numptsx, numptsy, delayy, xlabel, [offsetx, comments, RCcutoff, numAverage, notch]) //Units: mV, mT
-	// x-axis is the dac sweep
-	// y-axis is an index
-	// this will sweep: start -> fin, fin -> start, start -> fin, ....
-	// each sweep (whether up or down) will count as 1 y-index
-	// Data processing:
-	// 		- RCcutoff set the lowpass cutoff frequency
-	//		- average set the number of points to average
-	//		- nocth sets the notch frequencie, as a comma seperated list (width is fixed at 5Hz)
-
-	//TODO: Make this work with multiple channels. Each comma separated channel needs a comma separated start and fin string
-
-	variable fastdac, startx, finx, numptsx, numptsy, delayy, offsetx, RCcutoff, numAverage
-	string xlabel, channelsx, comments, notch
-	variable i=0, setpointx, setpointy
-	string x_label, y_label
-
-	if(paramisdefault(comments))
-		comments=""
-	endif
-
-	if( ParamIsDefault(offsetx))
-		offsetx=0
-	endif
-
-	// setup labels
-	x_label = xlabel
-	y_label = "Sweep Num"
-
-	// intialize waves
-	variable starty = 0, finy = numptsy-1, scandirection=0
-	InitializeWaves(startx, finx, numptsx, starty=starty, finy=finy, numptsy=numptsy, x_label=x_label, y_label=y_label, fastdac=1)
-
-	//RampMultipleBD(instrID, channelsx, setpointx, ramprate=rampratex)
-	
-	rampOutputfdac(fastdac, str2num(channelsx), startx)
-	sc_sleep(0.2)
-	string sx, fx  //startx and finx (which will switch back and forth between real startx and finx)
-	do
-		if(mod(i,2)==0)
-			sx = num2str(startx)
-			fx = num2str(finx)
-		else
-			sx = num2str(finx)
-			fx = num2str(startx)
-		endif
-
-		rampOutputfdac(fastdac, str2num(channelsx), str2num(sx))
-		sc_sleep(delayy) // wait at start point
-		fdacRecordValues(fastdac, i, channelsx, sx, fx, numptsx, RCcutoff=RCcutoff, numAverage=numAverage, notch=notch)  //1D sweep either forwards or backwards
-		i+=1
-	while (i<numptsy)
-	SaveWaves(msg=comments, fastdac=1)
-end
-
-
-function ScanFastDAC(fd, start, fin, channels, numpts, ramprate, [comments, nosave, RCcutoff, numAverage, notch]) //Units: mV
-	variable fd, start, fin, numpts, ramprate, nosave, RCcutoff, numAverage
-	string channels, comments, notch
-	string x_label
-
-	if(paramisdefault(comments))
-	comments=""
-	endif
-
-	x_label = GetLabel(channels)
-
-	//Ramp to start
-	rampOutputfdac(fd, str2num(channels), start, ramprate=ramprate)
-	sc_sleep(0.5)
-	InitializeWaves(start, fin, numpts, x_label=x_label, fastdac=1)
-	fdacRecordValues(fd, 0, channels, num2str(start), num2str(fin), numpts, RCcutoff=RCcutoff, numAverage=numAverage, notch=notch)
-	
-	if (nosave == 0)
-  		SaveWaves(msg=comments)
-  	else
-  		dowindow /k SweepControl
-	endif
-
-end
-
-
-function ScanFastDac2D(bd, fd, startx, finx, channelsx, numptsx, starty, finy, channelsy, numptsy, [delayy, ramprate, setchargesensor, comments, RCcutoff, numAverage, notch])
-	//ramprate is how fast to ramp back to beginning of scan
-	variable bd, fd, startx, finx, numptsx, starty, finy, numptsy, delayy, ramprate, setchargesensor, RCcutoff, numAverage
-	string channelsx, channelsy, notch, comments
-
-	variable/g sc_scanstarttime = datetime
-
-	ramprate = paramisdefault(ramprate) ? 5000 : ramprate
-
-	string/g sc_y_label, sc_x_label
-	//sc_x_label = getfdlabel(channelsx)
-	//TODO: Make getfdlabel
-	sc_y_label = getlabel(channelsy)
-
-	InitializeWaves(startx, finx, numptsx, starty=starty, finy=finy, numptsy=numptsy, x_label=sc_x_label, y_label=sc_y_label, fastdac=1)
-
-	variable i, rt
-	rampmultiplebd(bd, channelsy, starty, ramprate=1000)
-	rampOutputfdac(fd, str2num(channelsx), startx, ramprate=ramprate)	
-	i = 0
-	do
-		rampmultiplebd(bd, channelsy, starty+i*((finy-starty)/(numptsy-1)), ramprate=1000)
-
-		if (setchargesensor == 1)
-			rampOutputfdac(fd, str2num(channelsx), round((startx+finx)/2), ramprate=ramprate)
-			//setchargesensorfd(fd, bd)
-			//TODO: Put this back in!
-			rampOutputfdac(fd, str2num(channelsx), startx, ramprate=ramprate)	
-		endif
-		
-		sc_sleep(delayy)
-		fdacRecordValues(fd, i, channelsx, num2str(startx), num2str(finx), numptsx, RCcutoff=RCcutoff, numAverage=numAverage, notch=notch)
-	while (i<numptsy)
-	SaveWaves(msg=comments, fastdac=1)
-end
+//function ScanFastDacRepeat(fastdac, startx, finx, channelsx, numptsx, numptsy, delayy, xlabel, [offsetx, comments, RCcutoff, numAverage, notch]) //Units: mV, mT
+//	// x-axis is the dac sweep
+//	// y-axis is an index
+//	// this will sweep: start -> fin, fin -> start, start -> fin, ....
+//	// each sweep (whether up or down) will count as 1 y-index
+//	// Data processing:
+//	// 		- RCcutoff set the lowpass cutoff frequency
+//	//		- average set the number of points to average
+//	//		- nocth sets the notch frequencie, as a comma seperated list (width is fixed at 5Hz)
+//
+//	//TODO: Make this work with multiple channels. Each comma separated channel needs a comma separated start and fin string
+//
+//	variable fastdac, startx, finx, numptsx, numptsy, delayy, offsetx, RCcutoff, numAverage
+//	string xlabel, channelsx, comments, notch
+//	variable i=0, setpointx, setpointy
+//	string x_label, y_label
+//
+//	if(paramisdefault(comments))
+//		comments=""
+//	endif
+//
+//	if( ParamIsDefault(offsetx))
+//		offsetx=0
+//	endif
+//
+//	// setup labels
+//	x_label = xlabel
+//	y_label = "Sweep Num"
+//
+//	// intialize waves
+//	variable starty = 0, finy = numptsy-1, scandirection=0
+//	InitializeWaves(startx, finx, numptsx, starty=starty, finy=finy, numptsy=numptsy, x_label=x_label, y_label=y_label, fastdac=1)
+//
+//	//RampMultipleBD(instrID, channelsx, setpointx, ramprate=rampratex)
+//
+//	rampOutputfdac(fastdac, str2num(channelsx), startx)
+//	sc_sleep(0.2)
+//	string sx, fx  //startx and finx (which will switch back and forth between real startx and finx)
+//	do
+//		if(mod(i,2)==0)
+//			sx = num2str(startx)
+//			fx = num2str(finx)
+//		else
+//			sx = num2str(finx)
+//			fx = num2str(startx)
+//		endif
+//
+//		rampOutputfdac(fastdac, str2num(channelsx), str2num(sx))
+//		sc_sleep(delayy) // wait at start point
+//		fdacRecordValues(fastdac, i, channelsx, sx, fx, numptsx, RCcutoff=RCcutoff, numAverage=numAverage, notch=notch)  //1D sweep either forwards or backwards
+//		i+=1
+//	while (i<numptsy)
+//	SaveWaves(msg=comments, fastdac=1)
+//end
+//
+//
+//function ScanFastDAC(fd, start, fin, channels, numpts, ramprate, [comments, nosave, RCcutoff, numAverage, notch]) //Units: mV
+//	variable fd, start, fin, numpts, ramprate, nosave, RCcutoff, numAverage
+//	string channels, comments, notch
+//	string x_label
+//
+//	if(paramisdefault(comments))
+//	comments=""
+//	endif
+//
+//	x_label = GetLabel(channels)
+//
+//	//Ramp to start
+//	rampOutputfdac(fd, str2num(channels), start, ramprate=ramprate)
+//	sc_sleep(0.5)
+//	InitializeWaves(start, fin, numpts, x_label=x_label, fastdac=1)
+//	fdacRecordValues(fd, 0, channels, num2str(start), num2str(fin), numpts, RCcutoff=RCcutoff, numAverage=numAverage, notch=notch)
+//
+//	if (nosave == 0)
+//  		SaveWaves(msg=comments)
+//  	else
+//  		dowindow /k SweepControl
+//	endif
+//
+//end
+//
+//
+//function ScanFastDac2D(bd, fd, startx, finx, channelsx, numptsx, starty, finy, channelsy, numptsy, [delayy, ramprate, setchargesensor, comments, RCcutoff, numAverage, notch])
+//	//ramprate is how fast to ramp back to beginning of scan
+//	variable bd, fd, startx, finx, numptsx, starty, finy, numptsy, delayy, ramprate, setchargesensor, RCcutoff, numAverage
+//	string channelsx, channelsy, notch, comments
+//
+//	variable/g sc_scanstarttime = datetime
+//
+//	ramprate = paramisdefault(ramprate) ? 5000 : ramprate
+//
+//	string/g sc_y_label, sc_x_label
+//	//sc_x_label = getfdlabel(channelsx)
+//	//TODO: Make getfdlabel
+//	sc_y_label = getlabel(channelsy)
+//
+//	InitializeWaves(startx, finx, numptsx, starty=starty, finy=finy, numptsy=numptsy, x_label=sc_x_label, y_label=sc_y_label, fastdac=1)
+//
+//	variable i, rt
+//	rampmultiplebd(bd, channelsy, starty, ramprate=1000)
+//	rampOutputfdac(fd, str2num(channelsx), startx, ramprate=ramprate)
+//	i = 0
+//	do
+//		rampmultiplebd(bd, channelsy, starty+i*((finy-starty)/(numptsy-1)), ramprate=1000)
+//
+//		if (setchargesensor == 1)
+//			rampOutputfdac(fd, str2num(channelsx), round((startx+finx)/2), ramprate=ramprate)
+//			//setchargesensorfd(fd, bd)
+//			//TODO: Put this back in!
+//			rampOutputfdac(fd, str2num(channelsx), startx, ramprate=ramprate)
+//		endif
+//
+//		sc_sleep(delayy)
+//		fdacRecordValues(fd, i, channelsx, num2str(startx), num2str(finx), numptsx, RCcutoff=RCcutoff, numAverage=numAverage, notch=notch)
+//	while (i<numptsy)
+//	SaveWaves(msg=comments, fastdac=1)
+//end
 
 
 //function ScanFastDac2DLine(bd, fd, startx, finx, channelsx, numptsx, x_label, starty, finy, channelsy, numptsy, delayy, width, [comments, rampratex, rampratey, x1, y1, x2, y2, linecut, followtolerance, startrange])//Units: mV
@@ -358,6 +358,43 @@ function ScanBabyDAC(instrID, start, fin, channels, numpts, delay, ramprate, [co
 
 end
 
+function ScanFastDACslow(instrID, start, fin, channels, numpts, delay, ramprate, [comments, nosave]) //Units: mV
+	// sweep one or more fastDAC channels in old slow way
+	// channels should be a comma-separated string ex: "0, 4, 5"
+	variable instrID, start, fin, numpts, delay, ramprate, nosave
+	string channels, comments
+	string x_label
+	variable i=0, j=0, setpoint
+
+	if(paramisdefault(comments))
+	comments=""
+	endif
+
+	x_label = GetLabel(channels)
+
+	// set starting values
+	setpoint = start
+	RampMultiplefdac(instrID, channels, setpoint, ramprate=ramprate)
+
+	sc_sleep(1.0)
+	InitializeWaves(start, fin, numpts, x_label=x_label)
+	do
+		setpoint = start + (i*(fin-start)/(numpts-1))
+		RampMultiplefdac(instrID, channels, setpoint, ramprate=ramprate)
+		sc_sleep(delay)
+		RecordValues(i, 0)
+		i+=1
+	while (i<numpts)
+	if (nosave == 0)
+  		SaveWaves(msg=comments)
+  	else
+  		dowindow /k SweepControl
+	endif
+
+end
+
+
+
 function ScanBabyDACUntil(instrID, start, fin, channels, numpts, delay, ramprate, checkwave, value, [operator, comments, scansave]) //Units: mV
   // sweep one or more babyDAC channels until checkwave < (or >) value
   // channels should be a comma-separated string ex: "0, 4, 5"
@@ -519,141 +556,141 @@ function ScanBabyDAC2D(instrID, startx, finx, channelsx, numptsx, delayx, rampra
 end
 
 
-function ScanBabyDac2DLine(instrID, startx, finx, channelsx, stepmultiple, delayx, rampratex, starty, finy, channelsy, numptsy, delayy, rampratey, width, [x1, y1, x2, y2, comments, linecut, followtolerance, startrange, dmmid, findthreshold]) //Units: mV
-	variable instrID, startx, finx, stepmultiple, delayx, rampratex, starty
-	variable finy, numptsy, delayy, rampratey, x1, y1, x2, y2, width, linecut
-	variable followtolerance, startrange, dmmid, findthreshold
-	//startrange = how many mV to look from end of scan range in x for first transition
-	// findthreshold = tolerance in findtransition (~1 is high (not very reliable), 5 is low (very reliable))
-	string channelsx, channelsy, comments
-	variable i=0, j=0, setpointx, setpointy, ft = followtolerance, numptsx, threshold
-	string x_label, y_label
-	svar VKS = $getVKS()  //Global VariableKeyString so it can be passed and altered by the function (e.g. Cut2Dlines)
-	VKS = ""  // Reset global string
-
-	if((finx - startx)/(stepmultiple*0.076) < 20) //Easy to forget that it is stepmultiple instead of numptsx
-		doAlert/T="Check stepmultiple (not numptsx here!)" 1, "Do you really want to run a scan with only "\
-			+ num2istr((finx - startx)/(stepmultiple*0.076)) + " points per line? Remember stepmultiple is a multiple of minimum DAC step (0.76mV)"
-		if(V_flag == 2)
-			abort "Good choice"
-		endif
-	endif
-	numptsx = round(abs((finx-startx)/(stepmultiple*0.076)))
-
-	threshold = paramisdefault(findthreshold) ? 5 : findthreshold
-	startrange = paramIsDefault(startrange) ? 150 : startrange //gives default value if not specified
-	if(paramisdefault(comments))
-		comments=""
-	endif
-//	wave sc_measAsync
-//	wavestats/Q sc_measAsync
-//	if (linecut == 1 && V_sum != 0)
-//		abort "Can't measure asynchronously with linecut on, please untick boxes and try again"
+//function ScanBabyDac2DLine(instrID, startx, finx, channelsx, stepmultiple, delayx, rampratex, starty, finy, channelsy, numptsy, delayy, rampratey, width, [x1, y1, x2, y2, comments, linecut, followtolerance, startrange, dmmid, findthreshold]) //Units: mV
+//	variable instrID, startx, finx, stepmultiple, delayx, rampratex, starty
+//	variable finy, numptsy, delayy, rampratey, x1, y1, x2, y2, width, linecut
+//	variable followtolerance, startrange, dmmid, findthreshold
+//	//startrange = how many mV to look from end of scan range in x for first transition
+//	// findthreshold = tolerance in findtransition (~1 is high (not very reliable), 5 is low (very reliable))
+//	string channelsx, channelsy, comments
+//	variable i=0, j=0, setpointx, setpointy, ft = followtolerance, numptsx, threshold
+//	string x_label, y_label
+//	svar VKS = $getVKS()  //Global VariableKeyString so it can be passed and altered by the function (e.g. Cut2Dlines)
+//	VKS = ""  // Reset global string
+//
+//	if((finx - startx)/(stepmultiple*0.076) < 20) //Easy to forget that it is stepmultiple instead of numptsx
+//		doAlert/T="Check stepmultiple (not numptsx here!)" 1, "Do you really want to run a scan with only "\
+//			+ num2istr((finx - startx)/(stepmultiple*0.076)) + " points per line? Remember stepmultiple is a multiple of minimum DAC step (0.76mV)"
+//		if(V_flag == 2)
+//			abort "Good choice"
+//		endif
 //	endif
-
-	if(paramisdefault(x1) || paramisdefault(x2) || paramisdefault(y1) || paramisdefault(y2))
-		variable sy, numx
-		wave i_sense //uses charge transition to find positions and gradient
-		print "Scanning two lines to calculate initial gradient and transition coords"
-		numx = round(abs(startx-finx)/3 < 100 ? 100 : abs(startx - finx)/3) //shorthand if else. numx is larger of 100points or every 3mV
-		sy = starty < finy ? starty : finy //short if else statement. sets sy to lower of starty/finy to scan from bottom up
-		rampmultiplebd(instrID, channelsy, sy, ramprate = 1000)
-		rampmultiplebd(instrID, channelsx, finx-startrange, ramprate = 1000)
-		sc_sleep(0.5)
-		CorrectChargeSensor(instrid, dmmid)
-//		scanbabydac(instrID, finx-abs(finx-startx)*(1-startdec), finx, channelsx, numx*(1-startdec), delayx, 1000, nosave = 1) //1 point per mV, first assuming transition is in last 1/4
-		scanbabydac(instrID, finx-startrange, finx, channelsx, startrange, delayx, 1000, nosave = 1) //1 point per mV
-		dowindow /k SweepControl
-		//x1 = fitcharge1d(i_sense)
-		x1 = findtransitionmid(i_sense, threshold=threshold)
-		if(numtype(x1) == 2) //if didn't find it there, try other part
-			doAlert/T="Didn't find transition" 1, "Do you want to look in the rest of the scan region?"
-			if(V_flag == 2) //No clicked
-				abort "Didn't want to look in rest of range"
-			endif
-//			scanbabydac(instrID, startx, startx+startdec*abs(finx-startx), channelsx, numx*startdec, delayx, 1000, nosave = 1) //1 point per mV
-			scanbabydac(instrID, startx, finx-startrange, channelsx, round((finx-startrange-startx)/5), delayx, 1000, nosave = 1) //1 point per 5mV
-			dowindow /k SweepControl
-			//x1 = fitcharge1d(i_sense)
-			x1 = findtransitionmid(i_sense, threshold=threshold)
-			if(numtype(x1) == 2)
-				abort "failed to find charge transition in first row"
-			endif
-		endif
-		y1 = sy
-		rampmultiplebd(instrID, channelsy, sy+5, ramprate = 1000)
-		scanbabydac(instrID, x1-100, x1+20, channelsx, 121, delayx, 1000, nosave = 1) //only checks near to previous transition
-		dowindow /k SweepControl
-		//x2 = fitcharge1d(i_sense)
-		x2 = findtransitionmid(i_sense, threshold=threshold)
-		if(numtype(x2) == 2)
-			abort "failed to find charge transition at first row +5mV"
-		endif
-		y2 = sy+5
-		print "x1 = " + num2str(x1) + ", " + "y1 = " + num2str(y1) + ", " + "x2 = " + num2str(x2) + ", " + "y2 = " + num2str(y2) //useful if you want to run the same scan multiple times
-	endif
-
-	VKS = replacenumberbykey("x1", VKS, x1)
-	VKS = replacenumberbykey("x2", VKS, x2)
-	VKS = replacenumberbykey("y1", VKS, y1)
-	VKS = replacenumberbykey("y2", VKS, y2)
-	VKS = replacenumberbykey("w", VKS, width)
-	//VKS = replacenumberbykey("n", VKS, 0) 		//used by Cut2Dline for adapting line
-
-	sprintf x_label, "BD %s (mV)", channelsx
-	sprintf y_label, "BD %s (mV)", channelsy
-
-	InitializeWaves(startx, finx, numptsx, starty=starty, finy=finy, numptsy=numptsy, x_label=x_label, y_label=y_label, linecut=linecut)
-
-	sc_sleep(1.0)
-  	// main loop
-	do
-		j=0
-		setpointx = startx
-		setpointy = starty + (i*(finy-starty)/(numptsy-1))
-
-		do
-			setpointx = startx + (j*(finx-startx)/(numptsx-1))
-			if( Cut2Dline(x = setpointx, y = setpointy, followtolerance=ft) == 0 )
-				RecordValues(i, j, fillnan=1)
-				j+=1
-			else
-				break
-			endif
-		while( j<numptsx )
-
-		if (j == numptsx && i<numptsy-1)
-			i+=1
-			continue
-		elseif (j == numptsx && i >= numptsy-1)
-			print "No allowed values in final row"
-			break
-		endif
-
-	  	RampMultipleBD(instrID, channelsy, setpointy, ramprate=rampratey)
-  		RampMultipleBD(instrID, channelsx, setpointx, ramprate=rampratex)
-		sc_sleep(delayy)
-
-		CorrectChargeSensor(instrid, dmmid)
-
-		do
-		  setpointx = startx + (j*(finx-startx)/(numptsx-1))
-		  if( Cut2Dline(x = setpointx, y = setpointy) == 0 )
-		     RecordValues(i, j, fillnan=1)
-		  else
-    		  RampMultipleBD(instrID, channelsx, setpointx, ramprate=rampratex)
-		     sc_sleep(delayx)
-		     RecordValues(i, j)
-		  endif
-		  j+=1
-		while (j<numptsx)
-		// tell cutfunc another line is completed
-		i+=1
-		VKS = ReplaceNumberByKey("n", VKS, i) //Tells cut func which row has finished being scanned
-	while (i<numptsy)
-
-  SaveWaves(msg=comments)
-end
+//	numptsx = round(abs((finx-startx)/(stepmultiple*0.076)))
+//
+//	threshold = paramisdefault(findthreshold) ? 5 : findthreshold
+//	startrange = paramIsDefault(startrange) ? 150 : startrange //gives default value if not specified
+//	if(paramisdefault(comments))
+//		comments=""
+//	endif
+////	wave sc_measAsync
+////	wavestats/Q sc_measAsync
+////	if (linecut == 1 && V_sum != 0)
+////		abort "Can't measure asynchronously with linecut on, please untick boxes and try again"
+////	endif
+//
+//	if(paramisdefault(x1) || paramisdefault(x2) || paramisdefault(y1) || paramisdefault(y2))
+//		variable sy, numx
+//		wave i_sense //uses charge transition to find positions and gradient
+//		print "Scanning two lines to calculate initial gradient and transition coords"
+//		numx = round(abs(startx-finx)/3 < 100 ? 100 : abs(startx - finx)/3) //shorthand if else. numx is larger of 100points or every 3mV
+//		sy = starty < finy ? starty : finy //short if else statement. sets sy to lower of starty/finy to scan from bottom up
+//		rampmultiplebd(instrID, channelsy, sy, ramprate = 1000)
+//		rampmultiplebd(instrID, channelsx, finx-startrange, ramprate = 1000)
+//		sc_sleep(0.5)
+//		CorrectChargeSensor(instrid, dmmid)
+////		scanbabydac(instrID, finx-abs(finx-startx)*(1-startdec), finx, channelsx, numx*(1-startdec), delayx, 1000, nosave = 1) //1 point per mV, first assuming transition is in last 1/4
+//		scanbabydac(instrID, finx-startrange, finx, channelsx, startrange, delayx, 1000, nosave = 1) //1 point per mV
+//		dowindow /k SweepControl
+//		//x1 = fitcharge1d(i_sense)
+//		x1 = findtransitionmid(i_sense, threshold=threshold)
+//		if(numtype(x1) == 2) //if didn't find it there, try other part
+//			doAlert/T="Didn't find transition" 1, "Do you want to look in the rest of the scan region?"
+//			if(V_flag == 2) //No clicked
+//				abort "Didn't want to look in rest of range"
+//			endif
+////			scanbabydac(instrID, startx, startx+startdec*abs(finx-startx), channelsx, numx*startdec, delayx, 1000, nosave = 1) //1 point per mV
+//			scanbabydac(instrID, startx, finx-startrange, channelsx, round((finx-startrange-startx)/5), delayx, 1000, nosave = 1) //1 point per 5mV
+//			dowindow /k SweepControl
+//			//x1 = fitcharge1d(i_sense)
+//			x1 = findtransitionmid(i_sense, threshold=threshold)
+//			if(numtype(x1) == 2)
+//				abort "failed to find charge transition in first row"
+//			endif
+//		endif
+//		y1 = sy
+//		rampmultiplebd(instrID, channelsy, sy+5, ramprate = 1000)
+//		scanbabydac(instrID, x1-100, x1+20, channelsx, 121, delayx, 1000, nosave = 1) //only checks near to previous transition
+//		dowindow /k SweepControl
+//		//x2 = fitcharge1d(i_sense)
+//		x2 = findtransitionmid(i_sense, threshold=threshold)
+//		if(numtype(x2) == 2)
+//			abort "failed to find charge transition at first row +5mV"
+//		endif
+//		y2 = sy+5
+//		print "x1 = " + num2str(x1) + ", " + "y1 = " + num2str(y1) + ", " + "x2 = " + num2str(x2) + ", " + "y2 = " + num2str(y2) //useful if you want to run the same scan multiple times
+//	endif
+//
+//	VKS = replacenumberbykey("x1", VKS, x1)
+//	VKS = replacenumberbykey("x2", VKS, x2)
+//	VKS = replacenumberbykey("y1", VKS, y1)
+//	VKS = replacenumberbykey("y2", VKS, y2)
+//	VKS = replacenumberbykey("w", VKS, width)
+//	//VKS = replacenumberbykey("n", VKS, 0) 		//used by Cut2Dline for adapting line
+//
+//	sprintf x_label, "BD %s (mV)", channelsx
+//	sprintf y_label, "BD %s (mV)", channelsy
+//
+//	InitializeWaves(startx, finx, numptsx, starty=starty, finy=finy, numptsy=numptsy, x_label=x_label, y_label=y_label, linecut=linecut)
+//
+//	sc_sleep(1.0)
+//  	// main loop
+//	do
+//		j=0
+//		setpointx = startx
+//		setpointy = starty + (i*(finy-starty)/(numptsy-1))
+//
+//		do
+//			setpointx = startx + (j*(finx-startx)/(numptsx-1))
+//			if( Cut2Dline(x = setpointx, y = setpointy, followtolerance=ft) == 0 )
+//				RecordValues(i, j, fillnan=1)
+//				j+=1
+//			else
+//				break
+//			endif
+//		while( j<numptsx )
+//
+//		if (j == numptsx && i<numptsy-1)
+//			i+=1
+//			continue
+//		elseif (j == numptsx && i >= numptsy-1)
+//			print "No allowed values in final row"
+//			break
+//		endif
+//
+//	  	RampMultipleBD(instrID, channelsy, setpointy, ramprate=rampratey)
+//  		RampMultipleBD(instrID, channelsx, setpointx, ramprate=rampratex)
+//		sc_sleep(delayy)
+//
+//		CorrectChargeSensor(instrid, dmmid)
+//
+//		do
+//		  setpointx = startx + (j*(finx-startx)/(numptsx-1))
+//		  if( Cut2Dline(x = setpointx, y = setpointy) == 0 )
+//		     RecordValues(i, j, fillnan=1)
+//		  else
+//    		  RampMultipleBD(instrID, channelsx, setpointx, ramprate=rampratex)
+//		     sc_sleep(delayx)
+//		     RecordValues(i, j)
+//		  endif
+//		  j+=1
+//		while (j<numptsx)
+//		// tell cutfunc another line is completed
+//		i+=1
+//		VKS = ReplaceNumberByKey("n", VKS, i) //Tells cut func which row has finished being scanned
+//	while (i<numptsy)
+//
+//  SaveWaves(msg=comments)
+//end
 
 
 function ScanBabyDAC2Dcut(instrID, startx, finx, channelsx, numptsx, delayx, rampratex, starty, finy, channelsy, numptsy, delayy, rampratey, func, [comments]) //Units: mV
@@ -934,16 +971,27 @@ function Display3VarScans(wavenamestr, [v1, v2, v3, uselabels, usecolorbar, diff
 		//	make/o/t varlabels = {"CSR", "CStotal", "SDP"}
 		//	make/o/t axislabels = {"SDL", "SDR"} //y, x
 		//	///////////////////////////////////////////////////////////////////////////////
+
+		//	///////////////////////////////////////////////////////////////////////////////
+
 	else
 		switch (scanset)
 			case 1:
-				// Setting up small dot first time. See notebook for more info
-				datstart = 545
-				v1gmax = 3; v2gmax = 3; v3gmax = 5 //Have to make global to use NumVarOrDefault...
-				v1start = -350; v2start = -550; v3start = 0
-				v1step = -50; v2step = -50; v3step = -25
-				make/o/t varlabels = {"CSR", "CStotal", "ACG"}
-				make/o/t axislabels = {"SDL", "SDR"} //y, x
+				// Right side of NikV2 15th feb 2020
+				datstart = 88
+				v1gmax = 5; v2gmax = 5; v3gmax = 2 //Have to make global to use NumVarOrDefault...
+				v1start = -100; v2start = -0; v3start = -300
+				v1step = -100; v2step = -100; v3step = -500
+				make/o/t varlabels = {"RCB", "RP", "RCSQ"}
+				make/o/t axislabels = {"RCSS", "RCT"} //y, x
+				break
+			case 2:
+				datstart = 139
+				v1gmax = 8; v2gmax = 4; v3gmax = 1 //Have to make global to use NumVarOrDefault...
+				v1start = 0; v2start = -100; v3start = 0
+				v1step = -25; v2step = -50; v3step = 0
+				make/o/t varlabels = {"LP", "LCSS", ""}
+				make/o/t axislabels = {"LCT", "LCB"} //y, x
 				break
 		endswitch
 	endif
@@ -1515,7 +1563,6 @@ function graddif(data, vertical, [threshlow, startx, finx, starty, finy]) // ver
 		endfor
 	endfor
 	//display; appendimage fitwave
-
 end
 
 
@@ -1667,7 +1714,7 @@ function FindTransitionMid(dat, [threshold]) //Finds mid by differentiating, ret
 	wave dat
 	variable threshold
 	variable MinVal, MinLoc, w, lower, upper
-	threshold = paramisDefault(threshold) ? 3 : threshold
+	threshold = paramisDefault(threshold) ? 2 : threshold  //was 3 before 11thMar2020
 	wavestats/Q dat //easy way to get num notNaNs
 	w = V_npnts/5 //width to smooth by (relative to how many datapoints taken)
 	redimension/N=-1 dat
@@ -1747,193 +1794,193 @@ end
 //
 //end
 
-function Cut2Dline([x, y, followtolerance, startx, finx]) //tests if x, y lie within lines defined in VKS. Returns 1 for Yes, 0 for No, or returns startx and finx of next line scan if used for fastscan
-	//followtolerance will adapt line equation up to tolerance (0.1 = 10% change)
-	variable x, y, followtolerance
-	variable &startx, &finx //For returning start and fin if being used by FastScan2D
-	svar VKS = $GetVKS() 	//VariableKeyString (global so it can storechanges)   VKS = "m; HighC; LowC; x1; x2; y1; y2"
+//function Cut2Dline([x, y, followtolerance, startx, finx]) //tests if x, y lie within lines defined in VKS. Returns 1 for Yes, 0 for No, or returns startx and finx of next line scan if used for fastscan
+//	//followtolerance will adapt line equation up to tolerance (0.1 = 10% change)
+//	variable x, y, followtolerance
+//	variable &startx, &finx //For returning start and fin if being used by FastScan2D
+//	svar VKS = $GetVKS() 	//VariableKeyString (global so it can storechanges)   VKS = "m; HighC; LowC; x1; x2; y1; y2"
+//
+//	variable m, HighC, LowC, c, ft = followtolerance, n, FS=0  //High/Low for the two y = mx+c equations, FS just to set whether fastscan or not
+//
+//	if (!paramisdefault(startx) || !paramisdefault(finx)) //If either not default, check all not default
+//		if (paramisdefault(startx) || paramisdefault(finx) || paramisdefault(y))
+//			abort "Need startx, finx, and y to return startx and finx"
+//		else
+//			FS=1
+//			wave FastScan, sc_xdata
+//			if (dimsize(fastscan,0) != numpnts(sc_xdata))
+//				wave i_sense2d = FastScanCh0_2D //Assumes I_sense data is on FastADC0
+//			else
+//				wave i_sense2d = FastScan2D //Hopefully makes compatible with rest of code
+//			endif
+//		endif
+//	elseif (!paramisdefault(x) || !paramisdefault(y))
+//		if (paramisdefault(x) || paramisdefault(y))
+//			abort "Need x and y to return whether in cut line or not"
+//			wave i_sense2d
+//		endif
+//	else
+//		abort "Something horribly wrong, need more inputs"
+//	endif
+//
+//
+//	m = numberbykey("m", VKS)
+//	HighC = numberbykey("HighC", VKS)
+//	LowC = numberbykey("LowC", VKS)
+//	c = numberbykey("c", VKS) //Used for FastScan
+//	n = numberbykey("n", VKS) //Used for followfunction
+//
+//	//caluclates Line equation from coords or previous data lines if necessary
+//	if (numtype(m)!=0 || numtype(HighC)!=0 || numtype(LowC)!=0 || n >= 2)  //Calculating line equations if necessary
+//		variable x1, x2, y1, y2, w //for calculating y = mx + c equations
+//
+//		w = numberbykey("w", VKS)
+//		if(n == 0 || numtype(n) == 2) //For first time or if n is not set and defaults to NaN
+//			x1 = numberbykey("x1", VKS)
+//			x2 = numberbykey("x2", VKS)
+//			y1 = numberbykey("y1", VKS)
+//			y2 = numberbykey("y2", VKS)
+//		elseif(ft == 0 && n >= 2) //If no finite tolerance
+//			n = -2 			//will stop Cut2Dline from storing junk data into VKS
+//			VKS = replacenumberbykey("n", VKS, -1) //when n = -1 is loaded next time it won't try calculate new eq
+//		elseif(n >= 2 && ft!= 0) //enough rows to calculate new coords and finite tolerance
+//			wave w_coef, sc_ydata, sc_linestart	//Fits to charge transition from charge sensor, funcfit stores values in W_coef, sc_ywave has y values of data, sc_linestart has first x position of isense_2d data
+//			nvar sc_is2d
+//			variable i = 0, nend
+//
+//			if(n < (ceil(abs(10/dimdelta(sc_ydata,0)))) && abs(dimdelta(sc_ydata,0)) < 5) //If there isn't enough data to do 10mV in y direction use all gathered so far
+//				nend = n
+//			elseif (abs(dimdelta(sc_ydata,0))<5) //otherwise use enough data to cover 10mV
+//				nend = ceil(abs(10/dimdelta(sc_ydata,0)))
+//			else
+//				nend = 2 // if ydata is sparse (i.e. quick scan) just use previous two points for gradient
+//			endif
+//
+//			make/Free/O/N=(nend,2) coords = NaN	 //to store multiple transition coords
+//			do //Find previous x and y coords of transitions
+//				duplicate/FREE/O/RMD=[][(n-1)-i] i_sense2d datrow
+//				if(sc_is2d == 2) //only necessary for line cut
+//					setscale/P x, sc_linestart[(n-1)-i], dimdelta(i_sense2d, 0), datrow //Need to give correct dimensions before fitting
+//				endif
+//				coords[i][0] = fitcharge1d(datrow)
+//				coords[i][1] = sc_ydata[(n-1)-i]
+//				i+=1
+//			while (i<nend)
+//
+//			wavestats/Q/M=1/RMD=[][0] coords
+//			if(V_numnans/dimsize(coords,0) < 0.5 && dimsize(coords,0) - V_numNans >= 2) //if at least 50% successful fits	and at least two data points make and check new m and Cs
+//				curveFit/Q line, coords[][1] /X=coords[][0]
+//				m = w_coef[1] 						//new gradient from linefit
+//
+//				variable oldm, TE // TE for ToleranceExceedNum number that I store in VKS
+//				oldm = numberbykey("m", VKS)
+//				TE = numberbykey("TolExceedNum", VKS) //Loads previous error code stored (NaN by default)
+//				if(numtype(TE) == 2) //Sets TE to zero if first time being loaded
+//					TE = 0
+//				elseif(TE > 0.4)
+//					TE = TE-0.4 		//so that E only causes abort if maxes out 5 times in a row, or more than ~40% of the time
+//				endif
+//				// Check to see if m has changed more than allowed by tolerance (Probably won't handle stationary points)
+//				if(abs((m-oldm)/oldm) > ft)
+//					print "m change by " +num2str(((m-oldm)/oldm)*100) + "% @ n = " + num2str(n) + ", TE @ " + num2str(TE+1)
+//					m = oldm*(1+sign(abs(m)-abs(oldm))*ft) //increases/decreases m by max allowed amount
+//					TE += 1 //increment Error value
+//				endif
+//				if(TE>4)
+//					savewaves()
+//					abort "Cut2Dline has changed gradient by max tolerance too many times in a row"
+//				endif
+//				VKS = replacenumberbykey("TolExceedNum", VKS, TE) //Stores total errors
+//				VKS = replacenumberbykey("n", VKS, -1) //Prevent re-running this whole chunk of code until a new n value is stored by scan function
+//				i = 0
+//				do //get most recent nonNan transition coord
+//					x1 = coords[i][0]; y1 = coords[i][1]
+//					i+=1
+//				while(numtype(x1)==2 && i<nend)
+//				if(numtype(x1) == 0) //If good coord then calc high and low C
+//					HighC = y1-m*(x1-sign(m)*w/2) 	//
+//					LowC = y1-m*(x1+sign(m)*w/2)		//
+//					c = y1-m*x1
+//				else
+//					if (FS == 1)
+//						abort "Did not manage to make new gradient, waves not saved!!"
+//					else
+//						savewaves()
+//					abort "Can't find x1, y1 to calc new C values"
+//					endif
+//				endif
+//
+//			else
+//				VKS = replacenumberbykey("n", VKS, -1) //don't calc again until new row of data
+//				n=-2	//don't store junk data in VKS
+//			endif
+//		else
+//			abort "Cut2Dline Failed unexpectedly, waves not saved!!"
+//		endif
+//
+//
+//		if(n == 0 || numtype(n) == 2) //if first time through or not using n
+//			m = ((y2-y1)/(x2-x1))
+//			HighC = y1-m*(x1-sign(m)*w/2) //sign(m) makes it work for +ve or -ve gradient
+//			LowC = y1-m*(x1+sign(m)*w/2)	//For both y = mx + c equations
+//			c = y1-m*x1
+//		endif
+//
+//
+//		//If sanity checks passed/values made acceptable, or just first time through then store values
+//		if(n != -2 ) //use this to prevent storing values
+//			VKS = replacenumberbykey("m", VKS, m)				//stores line eq back in VKS
+//			VKS = replacenumberbykey("HighC", VKS, HighC)
+//			VKS = replacenumberbykey("LowC", VKS, LowC)
+//			VKS = replacenumberbykey("c", VKS, c)
+//			VKS = replacenumberbykey("n", VKS, -1) //prevent recalculating until new data row
+//		endif
+//	endif
+//
+//	w = numberbykey("w", VKS)
+//	//Part that actually checks if x, y coords should be measured, or returns startx and finx for fastscan
+//	if (FS == 1)
+//		startx = (y-c)/m - w/2
+//		finx = (y-c)/m + w/2
+//	else
+//		if ((y - m*x - LowC) > 0 && (y - m*x - HighC) < 0)
+//			return 1
+//		else
+//			return 0
+//		endif
+//	endif
+//
+//end
 
-	variable m, HighC, LowC, c, ft = followtolerance, n, FS=0  //High/Low for the two y = mx+c equations, FS just to set whether fastscan or not
-
-	if (!paramisdefault(startx) || !paramisdefault(finx)) //If either not default, check all not default
-		if (paramisdefault(startx) || paramisdefault(finx) || paramisdefault(y))
-			abort "Need startx, finx, and y to return startx and finx"
-		else
-			FS=1
-			wave FastScan, sc_xdata
-			if (dimsize(fastscan,0) != numpnts(sc_xdata))
-				wave i_sense2d = FastScanCh0_2D //Assumes I_sense data is on FastADC0
-			else
-				wave i_sense2d = FastScan2D //Hopefully makes compatible with rest of code
-			endif
-		endif
-	elseif (!paramisdefault(x) || !paramisdefault(y))
-		if (paramisdefault(x) || paramisdefault(y))
-			abort "Need x and y to return whether in cut line or not"
-			wave i_sense2d
-		endif
-	else
-		abort "Something horribly wrong, need more inputs"
-	endif
-
-
-	m = numberbykey("m", VKS)
-	HighC = numberbykey("HighC", VKS)
-	LowC = numberbykey("LowC", VKS)
-	c = numberbykey("c", VKS) //Used for FastScan
-	n = numberbykey("n", VKS) //Used for followfunction
-
-	//caluclates Line equation from coords or previous data lines if necessary
-	if (numtype(m)!=0 || numtype(HighC)!=0 || numtype(LowC)!=0 || n >= 2)  //Calculating line equations if necessary
-		variable x1, x2, y1, y2, w //for calculating y = mx + c equations
-
-		w = numberbykey("w", VKS)
-		if(n == 0 || numtype(n) == 2) //For first time or if n is not set and defaults to NaN
-			x1 = numberbykey("x1", VKS)
-			x2 = numberbykey("x2", VKS)
-			y1 = numberbykey("y1", VKS)
-			y2 = numberbykey("y2", VKS)
-		elseif(ft == 0 && n >= 2) //If no finite tolerance
-			n = -2 			//will stop Cut2Dline from storing junk data into VKS
-			VKS = replacenumberbykey("n", VKS, -1) //when n = -1 is loaded next time it won't try calculate new eq
-		elseif(n >= 2 && ft!= 0) //enough rows to calculate new coords and finite tolerance
-			wave w_coef, sc_ydata, sc_linestart	//Fits to charge transition from charge sensor, funcfit stores values in W_coef, sc_ywave has y values of data, sc_linestart has first x position of isense_2d data
-			nvar sc_is2d
-			variable i = 0, nend
-
-			if(n < (ceil(abs(10/dimdelta(sc_ydata,0)))) && abs(dimdelta(sc_ydata,0)) < 5) //If there isn't enough data to do 10mV in y direction use all gathered so far
-				nend = n
-			elseif (abs(dimdelta(sc_ydata,0))<5) //otherwise use enough data to cover 10mV
-				nend = ceil(abs(10/dimdelta(sc_ydata,0)))
-			else
-				nend = 2 // if ydata is sparse (i.e. quick scan) just use previous two points for gradient
-			endif
-
-			make/Free/O/N=(nend,2) coords = NaN	 //to store multiple transition coords
-			do //Find previous x and y coords of transitions
-				duplicate/FREE/O/RMD=[][(n-1)-i] i_sense2d datrow
-				if(sc_is2d == 2) //only necessary for line cut
-					setscale/P x, sc_linestart[(n-1)-i], dimdelta(i_sense2d, 0), datrow //Need to give correct dimensions before fitting
-				endif
-				coords[i][0] = fitcharge1d(datrow)
-				coords[i][1] = sc_ydata[(n-1)-i]
-				i+=1
-			while (i<nend)
-
-			wavestats/Q/M=1/RMD=[][0] coords
-			if(V_numnans/dimsize(coords,0) < 0.5 && dimsize(coords,0) - V_numNans >= 2) //if at least 50% successful fits	and at least two data points make and check new m and Cs
-				curveFit/Q line, coords[][1] /X=coords[][0]
-				m = w_coef[1] 						//new gradient from linefit
-
-				variable oldm, TE // TE for ToleranceExceedNum number that I store in VKS
-				oldm = numberbykey("m", VKS)
-				TE = numberbykey("TolExceedNum", VKS) //Loads previous error code stored (NaN by default)
-				if(numtype(TE) == 2) //Sets TE to zero if first time being loaded
-					TE = 0
-				elseif(TE > 0.4)
-					TE = TE-0.4 		//so that E only causes abort if maxes out 5 times in a row, or more than ~40% of the time
-				endif
-				// Check to see if m has changed more than allowed by tolerance (Probably won't handle stationary points)
-				if(abs((m-oldm)/oldm) > ft)
-					print "m change by " +num2str(((m-oldm)/oldm)*100) + "% @ n = " + num2str(n) + ", TE @ " + num2str(TE+1)
-					m = oldm*(1+sign(abs(m)-abs(oldm))*ft) //increases/decreases m by max allowed amount
-					TE += 1 //increment Error value
-				endif
-				if(TE>4)
-					savewaves()
-					abort "Cut2Dline has changed gradient by max tolerance too many times in a row"
-				endif
-				VKS = replacenumberbykey("TolExceedNum", VKS, TE) //Stores total errors
-				VKS = replacenumberbykey("n", VKS, -1) //Prevent re-running this whole chunk of code until a new n value is stored by scan function
-				i = 0
-				do //get most recent nonNan transition coord
-					x1 = coords[i][0]; y1 = coords[i][1]
-					i+=1
-				while(numtype(x1)==2 && i<nend)
-				if(numtype(x1) == 0) //If good coord then calc high and low C
-					HighC = y1-m*(x1-sign(m)*w/2) 	//
-					LowC = y1-m*(x1+sign(m)*w/2)		//
-					c = y1-m*x1
-				else
-					if (FS == 1)
-						abort "Did not manage to make new gradient, waves not saved!!"
-					else
-						savewaves()
-					abort "Can't find x1, y1 to calc new C values"
-					endif
-				endif
-
-			else
-				VKS = replacenumberbykey("n", VKS, -1) //don't calc again until new row of data
-				n=-2	//don't store junk data in VKS
-			endif
-		else
-			abort "Cut2Dline Failed unexpectedly, waves not saved!!"
-		endif
-
-
-		if(n == 0 || numtype(n) == 2) //if first time through or not using n
-			m = ((y2-y1)/(x2-x1))
-			HighC = y1-m*(x1-sign(m)*w/2) //sign(m) makes it work for +ve or -ve gradient
-			LowC = y1-m*(x1+sign(m)*w/2)	//For both y = mx + c equations
-			c = y1-m*x1
-		endif
-
-
-		//If sanity checks passed/values made acceptable, or just first time through then store values
-		if(n != -2 ) //use this to prevent storing values
-			VKS = replacenumberbykey("m", VKS, m)				//stores line eq back in VKS
-			VKS = replacenumberbykey("HighC", VKS, HighC)
-			VKS = replacenumberbykey("LowC", VKS, LowC)
-			VKS = replacenumberbykey("c", VKS, c)
-			VKS = replacenumberbykey("n", VKS, -1) //prevent recalculating until new data row
-		endif
-	endif
-
-	w = numberbykey("w", VKS)
-	//Part that actually checks if x, y coords should be measured, or returns startx and finx for fastscan
-	if (FS == 1)
-		startx = (y-c)/m - w/2
-		finx = (y-c)/m + w/2
-	else
-		if ((y - m*x - LowC) > 0 && (y - m*x - HighC) < 0)
-			return 1
-		else
-			return 0
-		endif
-	endif
-
-end
-
-function CorrectChargeSensor(instrid, dmmid, [i, check, dcheat])
-//Corrects the charge sensor to read 2nA as starting point, use 'i' if you want to print which line you're at
-	variable instrid, dmmid, i, check, dcheat //dcheat in uV
-	dcheat = paramisdefault(dcheat) ? 100 : dcheat
-	variable dmmval = 0, cdac5, na = dcheat/50  //calibrated at 2nA for 100uV
-	wave/T dacvalstr
-	dmmval = read34401A(dmmid)
-	if (abs(dmmval-na) > 0.02)
-		do
-			cdac5 = str2num(dacvalstr[5][1])
-			if (!paramisDefault(i))
-				print "Ramping DAC5 to " + num2str(cdac5+(na-dmmval)/0.1122*(2/na)) + "mV, at line " + num2str(i)
-			endif
-			if (check==0) //no user input
-				if (-340 < cdac5+(na-dmmval)/0.1122*(2/na) && cdac5+(na-dmmval)/0.1122*(2/na) < -270) //Prevent it doing something crazy
-					rampmultiplebd(instrid, "5", cdac5+(na-dmmval)/0.1122*(2/na), ramprate=100)
-				endif
-			else //ask for user input
-				doAlert/T="About to change DAC5" 1, "Scan wants to ramp DAC5 to " + num2str(cdac5+(na-dmmval)/0.1122*(2/na)) +"mV, is that OK?"
-				if (V_flag == 1)
-					rampmultiplebd(instrid, "5", cdac5+(na-dmmval)/0.1122*(2/na), ramprate=100)
-				else
-					abort "Computer tried to do bad thing"
-				endif
-			endif
-			dmmval = read34401A(dmmid)
-		while (abs(dmmval-na) > 0.05)
-	endif
-end
+//function CorrectChargeSensor(instrid, dmmid, [i, check, dcheat])
+////Corrects the charge sensor to read 2nA as starting point, use 'i' if you want to print which line you're at
+//	variable instrid, dmmid, i, check, dcheat //dcheat in uV
+//	dcheat = paramisdefault(dcheat) ? 100 : dcheat
+//	variable dmmval = 0, cdac5, na = dcheat/50  //calibrated at 2nA for 100uV
+//	wave/T dacvalstr
+//	dmmval = read34401A(dmmid)
+//	if (abs(dmmval-na) > 0.02)
+//		do
+//			cdac5 = str2num(dacvalstr[5][1])
+//			if (!paramisDefault(i))
+//				print "Ramping DAC5 to " + num2str(cdac5+(na-dmmval)/0.1122*(2/na)) + "mV, at line " + num2str(i)
+//			endif
+//			if (check==0) //no user input
+//				if (-340 < cdac5+(na-dmmval)/0.1122*(2/na) && cdac5+(na-dmmval)/0.1122*(2/na) < -270) //Prevent it doing something crazy
+//					rampmultiplebd(instrid, "5", cdac5+(na-dmmval)/0.1122*(2/na), ramprate=100)
+//				endif
+//			else //ask for user input
+//				doAlert/T="About to change DAC5" 1, "Scan wants to ramp DAC5 to " + num2str(cdac5+(na-dmmval)/0.1122*(2/na)) +"mV, is that OK?"
+//				if (V_flag == 1)
+//					rampmultiplebd(instrid, "5", cdac5+(na-dmmval)/0.1122*(2/na), ramprate=100)
+//				else
+//					abort "Computer tried to do bad thing"
+//				endif
+//			endif
+//			dmmval = read34401A(dmmid)
+//		while (abs(dmmval-na) > 0.05)
+//	endif
+//end
 
 //function setoffsetfd(bdchannel, adcchannel, [setpoint, check, direction]) //Set direction 1 or -1 correction direction
 //	string bdchannel, adcchannel
@@ -2656,7 +2703,7 @@ function notify(message)
 	string message
 	print message
 	getslacknotice("U8W2V6QK0", message=message,min_time=1) //Me
-	getslacknotice("UFTMDFVTR", message=message,min_time=1) //Owen? Or other way around??
+//	getslacknotice("UFTMDFVTR", message=message,min_time=1) //Owen? Or other way around??
 end
 
 
@@ -2753,6 +2800,24 @@ end
 function AABabyDac()
 end
 
+
+Window dacloadwindow() : Panel
+	PauseUpdate; Silent 1 // building window
+	NewPanel /W=(100,100,400,630) // window size
+	ModifyPanel frameStyle=2
+	SetDrawLayer UserBack
+	SetDrawEnv fsize= 25,fstyle= 1
+	DrawText 20, 45,"Choose DAC init" // Headline
+	SetDrawEnv fsize= 16,fstyle= 1
+	DrawText 40,80,"Old init"
+	SetDrawEnv fsize= 16,fstyle= 1
+	DrawText 170,80,"Loaded"
+	ListBox loadlist,pos={10,90},size={280,390},fsize=16,frame=2
+	ListBox loadlist,fStyle=1,listWave=root:initwave,selWave=root:attinitlist,mode= 0
+	Button old_dacinit,pos={40,490},size={70,20},proc=bdAskUserUpdate,title="OLD INIT" // 12th Mar keep changing fom here
+	Button default_dacinit,pos={170,490},size={70,20},proc=bdAskUserUpdate,title="DEFAULT"
+EndMacro
+
 // TODO: Make this work with FastDacs
 function LoadDacs(datnum, [noask])
 	variable datnum, noask
@@ -2761,12 +2826,19 @@ function LoadDacs(datnum, [noask])
 	HDF5OpenFile /P=data fileid as "dat"+num2str(datnum)+".h5"
 
 	HDF5Loaddata/o/Q /N=loadeddacvalstr 	fileid, "dacvalstr"
+	HDF5Loaddata/O/Q /N=loaddedfdacvalstr 	fileid, "fdacvalstr"
+
 	HDF5CloseFile fileid
 
+
 	wave/t loadeddacvalstr
+	wave/t loadedfdacvalstr
 	wave/t old_dacvalstr
+	wave/t	old_fdacvalstr
 	wave/t dacvalstr
+	wave/t fdacvalstr
 	variable/g bd_answer = 0
+	variable/g fd_answer = 0
 
 	if (noask == 0)
 		make /o attinitlist = {{0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0},{0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}}
@@ -2777,6 +2849,8 @@ function LoadDacs(datnum, [noask])
 		PauseForUser bdInitWindow  //Sets bd_answer to -1 for change, or 1 for don't change
 		// Just used same init window here because I didn't want to make a new one.
 	endif
+
+
 
 	if (bd_answer == -1 || noask == 1)
 		// open temporary connection to babyDAC
@@ -2804,20 +2878,34 @@ function LoadDacs(datnum, [noask])
 
 end
 
-//TODO: Make this work with fastdacs
-function/S GetLabel(channels)
-	string channels
 
-	variable nChannels, i
+function/S GetLabel(channels, [fastdac])
+	string channels
+	variable fastdac
+
+	variable i=0
+	variable nChannels
 	string channel, buffer, xlabelfriendly = ""
 	wave/t dacvalstr
+	wave/t fdacvalstr
 	nChannels = ItemsInList(channels, ",")
 	for(i=0;i<nChannels;i+=1)
 		channel = StringFromList(i, channels, ",")
-		buffer = dacvalstr[str2num(channel)][3] // Grab name from dacvalstr
-		if (cmpstr(buffer, "") == 0)
-			buffer = "BD"+channel
+
+		if (fastdac == 0)
+			buffer = dacvalstr[str2num(channel)][3] // Grab name from dacvalstr
+			if (cmpstr(buffer, "") == 0)
+				buffer = "BD"+channel
+			endif
+		elseif (fastdac == 1)
+			buffer = fdacvalstr[str2num(channel)][3] // Grab name from fdacvalstr
+			if (cmpstr(buffer, "") == 0)
+				buffer = "FD"+channel
+			endif
+		else
+			abort "\"GetLabel\": Fastdac flag must be 0 or 1"
 		endif
+
 		if (cmpstr(xlabelfriendly, "") != 0)
 			buffer = ", "+buffer
 		endif

@@ -1,8 +1,114 @@
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 ///////// My Analysis ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-function AAMyAnalysis()
+
+
+///////////////////////////////// Display/Analysis Functions ////////////////
+
+function DisplayDiff(w, [x_label, y_label, filenum])
+	wave w
+	string x_label, y_label
+	variable filenum
+	
+	
+	svar sc_x_label, sc_y_label
+	x_label = selectstring(paramisdefault(x_label), x_label, sc_x_label)
+	y_label = selectstring(paramisdefault(y_label), y_label, sc_y_label)
+	
+	string window_name = ""
+	sprintf window_name, "%s__differentiated", nameofwave(w)
+	string wn = ""
+	sprintf wn, "%s__diffx", nameofwave(w)	
+	
+	wave tempwave = Diffwave(w)
+
+	dowindow/k $window_name
+	display/N=$window_name
+	appendimage tempwave
+	ModifyImage tempwave ctab= {*,*,VioletOrangeYellow,0}
+	TextBox/W=$window_name/C/N=textid/A=LT/X=1.00/Y=1.00/E=2 window_name	
+	Label left, y_label
+	Label bottom, x_label
+	if (filenum > 0)
+		string text
+		sprintf text "Dat%d", filenum
+		TextBox/W=$window_name/C/N=datnum/A=LT text
+	endif
 end
+
+
+function/wave DiffWave(w)
+	wave w
+	
+	duplicate/o w, tempwave
+	smooth/DIM=0 ceil(dimsize(w,0)/10), tempwave
+	differentiate/DIM=0 tempwave	
+	return tempwave
+end
+
+function DisplayMultiple(datnums, name_of_wave, [diff, x_label, y_label])
+// Plots data from each dat on same axes... Will differentiate first if diff = 1
+	wave datnums
+	string name_of_wave, x_label, y_label
+	variable diff
+
+	svar sc_x_label, sc_y_label
+	x_label = selectstring(paramisdefault(x_label), x_label, sc_x_label)
+	y_label = selectstring(paramisdefault(y_label), y_label, sc_y_label)
+	
+	string window_name
+	sprintf window_name, "Dats%dto%d", datnums[0], datnums[numpnts(datnums)-1]
+	dowindow/k $window_name
+	display/N=$window_name
+	TextBox/W=$window_name/C/N=textid/A=LT/X=1.00/Y=1.00/E=2 window_name	
+	
+	
+	variable i = 0, datnum
+	string wn
+	string tempwn
+	for(i=0; i < numpnts(datnums); i++)
+		datnum = datnums[i]
+		sprintf wn, "dat%d%s", datnum, name_of_wave
+		sprintf tempwn, "tempwave_%s", wn
+		duplicate/o $wn, $tempwn
+		wave tempwave = $tempwn
+		if (diff == 1)
+			wave tempwave2 = diffwave($tempwn)
+			tempwave = tempwave2
+		endif
+		appendimage/W=$window_name tempwave
+		ModifyImage/W=$window_name $tempwn ctab= {*,*,VioletOrangeYellow,0}
+	endfor
+	Label left, y_label
+	Label bottom, x_label
+
+end
+
+
+function DisplayWave(w, [x_label, y_label])
+	wave w
+	string x_label, y_label
+	
+	svar sc_x_label, sc_y_label
+	x_label = selectstring(paramisdefault(x_label), x_label, sc_x_label)
+	y_label = selectstring(paramisdefault(y_label), y_label, sc_y_label)
+	
+	string name, wn = nameofwave(w)
+	sprintf name "%s_", wn
+	
+	svar sc_colormap
+	dowindow/k $name
+	display/N=$name
+	setwindow kwTopWin, graphicsTech=0
+	appendimage $wn
+	modifyimage $wn ctab={*, *, $sc_ColorMap, 0}
+	colorscale /c/n=$sc_ColorMap /e/a=rc
+	Label left, y_label
+	Label bottom, x_label
+	TextBox/W=$name/C/N=textid/A=LT/X=1.00/Y=1.00/E=2 name
+	
+end
+
 
 
 function Display3VarScans(wavenamestr, [v1, v2, v3, uselabels, usecolorbar, diffchargesense, switchrowscols, scanset, showentropy])

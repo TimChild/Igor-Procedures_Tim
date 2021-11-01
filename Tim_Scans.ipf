@@ -26,6 +26,23 @@ function DotTuneAround(x, y, width_x, width_y, channelx, channely, [sweeprate, r
 end
 
 
+function checkPinchOffs(instrID, channels, gate_names, ohmic_names, max_bias, [reset_zero, nosave])
+	// Helpful for checking pinch offs
+	// reset_zero: Whether to return gates to 0 bias at end of pinch off (defaults to True)
+	variable instrID, max_bias, reset_zero, nosave
+	string channels, gate_names, ohmic_names
+
+	reset_zero = paramIsDefault(reset_zero) ? 1 : reset_zero  
+
+	string buffer
+	sprintf buffer, "Pinch off, Gates=%s, Ohmics=%s", gate_names, ohmic_names
+	ScanFastDAC(instrID, 0, max_bias, channels, sweeprate=100, y_label="Current /nA", comments=buffer, nosave=nosave)	
+	if (reset_zero)
+		rampmultiplefdac(instrID, channels, 0)
+	endif
+end
+
+
 function steptempscanSomething()
 	nvar fd
 	svar xld

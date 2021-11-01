@@ -19,7 +19,7 @@ function DotTuneAround(x, y, width_x, width_y, channelx, channely, [sweeprate, r
 	rampmultiplefdac(fd, channely, y)
 	
 	CorrectChargeSensor(fd=fd, fdchannelstr=csname, fadcID=fd, fadcchannel=0, check=0, natarget=natarget, direction=1)
-	ScanFastDAC2D(fd, x-width_x, x+width_x, channelx, y-width_y, y+width_y, channely, numptsy, sweeprate=sweeprate, rampratex=ramprate_x, nosave=0, comments="Dot Tuning", rccutoff=rccutoff)
+	ScanFastDAC2D(fd, x-width_x, x+width_x, channelx, y-width_y, y+width_y, channely, numptsy, sweeprate=sweeprate, rampratex=ramprate_x, nosave=0, comments="Dot Tuning")
 	wave tempwave = $"cscurrent_2d"
 	nvar filenum
 	displaydiff(tempwave, filenum=filenum-1)
@@ -52,7 +52,7 @@ function steptempscanSomething()
 		print "MEASURE AT: "+num2str(targettemps[i])+"mK"
 
 //		ScanTransitionMany()
-		EntropyVsHeaterBias()
+//		EntropyVsHeaterBias()
 
 		i+=1
 	while ( i<numpnts(targettemps) )
@@ -63,7 +63,7 @@ function steptempscanSomething()
 	asleep(60.0*60)
 
 //	ScanTransitionMany()
-	EntropyVsHeaterBias()
+//	EntropyVsHeaterBias()
 
 end
 
@@ -240,21 +240,7 @@ function ScanTransitionMany()
 				rampmultiplefdac(fd, "ESP", Var1[i])
 				rampmultiplefdac(fd, "ESS", Var1b[i])
 				for(repeats=0;repeats<3;repeats++)
-					rampmultiplefdac(fd, "HO1,HO2", 0)
-					rampmultiplefdac(fd, "ACC/100", 0, ramprate=10000)
-					CorrectChargeSensor(fd=fd, fdchannelstr="CSQ", fadcID=fd, fadcchannel=0, check=0, direction=1)
-					mid = centerontransition(gate="ESP", width=30, single_only=0)
-					rampmultiplefdac(fd, "ACC/100", -200, ramprate=10000)	
-					CorrectChargeSensor(fd=fd, fdchannelstr="CSQ", fadcID=fd, fadcchannel=0, check=0, direction=1)
-					GetIntegratedNoise("0", 8)
-//					mid = centerontransition(gate="ESP", width=30, single_only=0)
-					rampmultiplefdac(fd, "ACC/100", 0, ramprate=10000)
-					mid = centerontransition(gate="ACC/100", width=200, single_only=1)
-					GetIntegratedNoise("0", 8)		
-
-					ScanEntropyRepeat(center_first=1, balance_multiplier=1, width=100, hqpc_bias=50, additional_comments="entropy repeat, fairly high bias, rough scans only", freq=12.5, sweeprate=10, two_part=0, repeats=30, num=1)
-//					ScanTransition()
-//					asleep(600)
+					// Do Scan here
 				endfor
 			endfor
 		endfor

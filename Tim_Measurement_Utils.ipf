@@ -180,7 +180,8 @@ function CorrectChargeSensor([bd, bdchannelstr, dmmid, fd, fdchannelstr, fadcID,
 
 	//get current
 	if (!paramisdefault(dmmid))
-		current = read34401A(dmmid)
+		abort
+//		current = read34401A(dmmid)
 	else
 		current = getfadcChannel(fadcID, fadcchannel, len_avg=0.5)
 	endif
@@ -225,7 +226,8 @@ function CorrectChargeSensor([bd, bdchannelstr, dmmid, fd, fdchannelstr, fadcID,
 			endif
 			//get current
 			if (!paramisdefault(dmmid))
-				current = read34401A(dmmid)
+				abort
+//				current = read34401A(dmmid)
 			else
 				current = getfadcChannel(fadcID, fadcchannel, len_avg=avg_len)
 			endif
@@ -316,7 +318,7 @@ function FindTransitionMid(dat, [threshold]) //Finds mid by differentiating, ret
 end
 
 
-function centerontransition([gate, width, single_only])
+function CenterOnTransition([gate, width, single_only])
 	string gate
 	variable width, single_only
 	
@@ -350,3 +352,21 @@ function centerontransition([gate, width, single_only])
 end
 
 
+function saveLogsOnly([msg])
+	string msg
+	variable save_experiment // Default: Do not save experiment for just this
+
+	nvar filenum
+
+	if (paramisdefault(msg))
+		msg = "SaveLogsOnly"
+	endif
+
+	abort "Need to check this works, hopefully it does"
+
+	variable hdfid = initOpenSaveFiles(0)
+	LogsOnlySave(hdfid, msg)
+//	initSaveFiles(msg=msg, logs_only=1) // Saves logs here, and adds Logs_Only attr to root group of HDF
+	initcloseSaveFiles(num2str(hdfid))
+
+end

@@ -4,16 +4,29 @@
 
 
 ///////////////////////////////// Display/Analysis Functions ////////////////
+function plot_waterfall(w, x_label, y_label, [y_spacing])
+	wave w
+	string x_label, y_label
+	variable y_spacing
+	
+	display
+	setWindow kwTopWin, graphicsTech=0		
+	duplicate/o w tempwave
+	variable i
+	for (i=0; i<dimsize(w, 1); i++)
+		tempwave[][i] = tempwave[p][i]+y_spacing*i
+		AppendToGraph tempwave[][i]
+	endfor
+	setupGraph1D(WinName(0,1), x_label, y_label=y_label)
+end
 
 function DisplayDiff(w, [x_label, y_label, filenum])
 	wave w
 	string x_label, y_label
 	variable filenum
 	
-	
-	svar sc_x_label, sc_y_label
-	x_label = selectstring(paramisdefault(x_label), x_label, sc_x_label)
-	y_label = selectstring(paramisdefault(y_label), y_label, sc_y_label)
+	x_label = selectstring(paramisdefault(x_label), x_label, "No x_label")
+	y_label = selectstring(paramisdefault(y_label), y_label, "No y_label")
 	
 	string window_name = ""
 	sprintf window_name, "%s__differentiated", nameofwave(w)

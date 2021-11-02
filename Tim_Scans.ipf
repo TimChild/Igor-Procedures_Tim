@@ -36,7 +36,7 @@ function checkPinchOffs(instrID, channels, gate_names, ohmic_names, max_bias, [r
 
 	string buffer
 	sprintf buffer, "Pinch off, Gates=%s, Ohmics=%s", gate_names, ohmic_names
-	ScanFastDAC(instrID, 0, max_bias, channels, sweeprate=100, y_label="Current /nA", comments=buffer, nosave=nosave)	
+	ScanFastDAC(instrID, 0, max_bias, channels, sweeprate=100, x_label=gate_names+" /mV", y_label="Current /nA", comments=buffer, nosave=nosave)	
 	if (reset_zero)
 		rampmultiplefdac(instrID, channels, 0)
 	endif

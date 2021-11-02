@@ -368,5 +368,4 @@ function saveLogsOnly([msg])
 	LogsOnlySave(hdfid, msg)
 //	initSaveFiles(msg=msg, logs_only=1) // Saves logs here, and adds Logs_Only attr to root group of HDF
 	initcloseSaveFiles(num2str(hdfid))
-
 end

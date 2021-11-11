@@ -185,7 +185,7 @@ function CorrectChargeSensor([bd, bdchannelstr, dmmid, fd, fdchannelstr, fadcID,
 	else
 		current = getfadcChannel(fadcID, fadcchannel, len_avg=0.5)
 	endif
-	variable avg_len = 0.003// Starting time to avg, will increase as it gets closer to ideal value
+	variable avg_len = 0.001// Starting time to avg, will increase as it gets closer to ideal value
 	if (abs((current-natarget)/natarget) > 0.005)  // If more than 0.5% out
 		do
 
@@ -197,9 +197,9 @@ function CorrectChargeSensor([bd, bdchannelstr, dmmid, fd, fdchannelstr, fadcID,
 			endif
 
 			if (current < nAtarget)
-				nextdac = cdac+0.3*direction
+				nextdac = cdac+0.31*direction  // 0.305... is FastDAC resolution (20000/2^16)
 			else
-				nextdac = cdac-0.3*direction
+				nextdac = cdac-0.31*direction
 			endif
 
 			if (check==0) //no user input
@@ -243,7 +243,7 @@ function CorrectChargeSensor([bd, bdchannelstr, dmmid, fd, fdchannelstr, fadcID,
 			endif
 //			print avg_len
 			
-		while (abs((current-nAtarget)/natarget) > 0.03 && abs(current-nAtarget) > 5)  // While more than 3% out  
+		while (abs((current-nAtarget)/natarget) > 0.03 && abs(current-nAtarget) > zero_tol)  // While more than 3% out  
 
 		if (!paramisDefault(i))
 			print "Ramped to " + num2str(nextdac) + "mV, at line " + num2str(i)

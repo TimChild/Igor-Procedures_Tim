@@ -6,8 +6,7 @@ function DotTuneAround(x, y, width_x, width_y, channelx, channely, [sweeprate, r
 	variable sweeprate, numptsy
 	string channelx, channely, csname
 	
-	variable natarget = 725//595//750//287 //1335   // ADC reading in mV to get most sensitive part of CS
-	variable rccutoff = 1000
+	variable natarget = 556//595//750//287 //1335   // ADC reading in mV to get most sensitive part of CS
 	sweeprate = paramisdefault(sweeprate) ? 300 : sweeprate
 	numptsy = paramisdefault(numptsy) ? 21 : numptsy
 	csname = selectstring(paramisdefault(csname), csname, "CSQ")
@@ -22,7 +21,7 @@ function DotTuneAround(x, y, width_x, width_y, channelx, channely, [sweeprate, r
 	ScanFastDAC2D(fd, x-width_x, x+width_x, channelx, y-width_y, y+width_y, channely, numptsy, sweeprate=sweeprate, rampratex=ramprate_x, nosave=0, comments="Dot Tuning")
 	wave tempwave = $"cscurrent_2d"
 	nvar filenum
-	displaydiff(tempwave, filenum=filenum-1)
+	displaydiff(tempwave, filenum=filenum-1, x_label=GetLabel(SF_get_channels(channelx, fastdac=1), fastdac=1), y_label=GetLabel(SF_get_channels(channely, fastdac=1), fastdac=1))
 end
 
 
@@ -43,45 +42,67 @@ function checkPinchOffs(instrID, channels, gate_names, ohmic_names, max_bias, [r
 end
 
 
-function steptempscanSomething()
+function standardNoiseMeasurement(ca_amp_setting, [instrID, channel, comments, nosave])
+	// Run standard noise measurement (i.e. 5x 12s scans with fastdac reading 12kHz)
+	// ca_amp_setting = amplification on current amp (i.e. for 1e8 enter 8)
+	variable ca_amp_setting, instrID, channel, nosave
+	string comments
+	
+	if(paramIsDefault(instrID))
+		nvar fd
+		instrID = fd
+	endif
+	channel = paramIsDefault(channel) ? 0 : channel
+	comments = selectString(paramIsDefault(comments), comments, "")
+	
+	variable current_freq = getFADCspeed(instrID)
+	setFADCSpeed(instrID, 12195)
+	FDacSpectrumAnalyzer(instrID,num2str(channel),12,numAverage=5,comments="noise, spectrum, "+comments, ca_amp=ca_amp_setting, nosave=nosave)
+	setFADCSpeed(instrID, current_freq)
+end
+
+
+function StepTempScanSomething()
 	nvar fd
-	svar xld
+	svar ls370
 
 //	make/o targettemps =  {300, 275, 250, 225, 200, 175, 150, 125, 100, 75, 50, 40, 30, 20}
 //	make/o targettemps =  {200, 175, 150, 125, 100, 75, 50, 40, 30, 20}
 //	make/o targettemps =  {300, 250, 200, 150, 100, 75, 50, 35}
-	make/o targettemps =  {50}
+	make/o targettemps =  {75, 50, 35}
+//	make/o targettemps =  {50}
 
 //	make/o targettemps =  {30, 20}
 //	make/o targettemps =  {40, 30, 20}
 //	make/o heaterranges = {3.1, 3.1, 3.1, 3.1, 3.1, 3.1, 1, 1, 1, 1}
 //	make/o heaterranges = {1, 1, 0.31}
-	setLS370exclusivereader(xld,"mc")
+	setLS370exclusivereader(ls370,"mc")
 
 
 	variable i=0
 	do
 //		setLS370temp(xld,targettemps[i], maxcurrent=heaterranges[i])
-		setLS370temp(xld,targettemps[i])
+		setLS370temp(ls370,targettemps[i])
 		asleep(2.0)
-		WaitTillTempStable(xld, targettemps[i], 5, 20, 0.10)
+		WaitTillTempStable(ls370, targettemps[i], 5, 20, 0.10)
 		asleep(60.0)
 		print "MEASURE AT: "+num2str(targettemps[i])+"mK"
 
 //		ScanTransitionMany()
 //		EntropyVsHeaterBias()
-
+		ScanTransition(sweeprate=25, width=75, repeats=100, center_first=1, center_gate="TDP*40", center_width=40, sweep_gate="TDP*40", csqpc_gate="TDQ", additional_comments="Temp = " + num2str(targettemps[i]) + " mK")
 		i+=1
 	while ( i<numpnts(targettemps) )
 
 	// kill temperature control
-	setLS370heaterOff(xld)
-	resetLS370exclusivereader(xld)
+//	setLS370heaterOff(ls370)
+	setLS370temp(ls370,15)
+	resetLS370exclusivereader(ls370)
 	asleep(60.0*60)
 
 //	ScanTransitionMany()
 //	EntropyVsHeaterBias()
-
+	ScanTransition(sweeprate=25, width=75, repeats=100, center_first=1, center_gate="TDP*40", center_width=40, sweep_gate="TDP*40", csqpc_gate="TDQ", additional_comments="Temp = 15mK")
 end
 
 
@@ -167,32 +188,39 @@ end
 
 
 
-function ScanTransition([sweeprate, width, ramprate, repeats, center_first, center_gate, center_width, sweep_gate, additional_comments, mid])
-	variable sweeprate, width, ramprate, repeats, center_first, center_width, mid
-	string center_gate, sweep_gate, additional_comments
+function ScanTransition([sweeprate, width, ramprate, repeats, center_first, center_gate, center_width, sweep_gate, additional_comments, sweepgate_mid, csqpc_gate])
+	variable sweeprate, width, ramprate, repeats, center_first, center_width, sweepgate_mid
+	string center_gate, sweep_gate, additional_comments, csqpc_gate
 	nvar fd
 	
 	sweeprate = paramisdefault(sweeprate) ? 100 : sweeprate
 	width = paramisdefault(width) ? 200 : width
 	ramprate = paramisDefault(ramprate) ? 1000 : ramprate
 	repeats = paramIsDefault(repeats) ? 10 : repeats
-	mid = paramIsDefault(mid) ? 0 : mid
+	sweepgate_mid = paramIsDefault(sweepgate_mid) ? 0 : sweepgate_mid
 	// let center_first default to 0
 	sweep_gate = selectstring(paramisdefault(sweep_gate), sweep_gate, "ACC/100")
 	center_gate = selectstring(paramisdefault(center_gate), center_gate, "ESP")
 	center_width = paramisDefault(center_width) ? 50 : center_width
 	additional_comments = selectstring(paramisdefault(additional_comments), additional_comments, "")
+	csqpc_gate = selectstring(paramisdefault(csqpc_gate), csqpc_gate, "CSQ")		
 	
 	if (center_first)
-		rampmultiplefdac(fd, sweep_gate, mid, ramprate=ramprate)
-		mid = centerontransition(gate=center_gate, width=center_width, single_only=1)
-		print "Centered at ESP="+num2str(mid)+"mV"
+		rampmultiplefdac(fd, sweep_gate, sweepgate_mid, ramprate=ramprate)
+		CorrectChargeSensor(fd=fd, fdchannelstr=csqpc_gate, fadcID=fd, fadcchannel=0, check=0, direction=1)  
+		variable center_gate_mid
+		center_gate_mid = centerontransition(gate=center_gate, width=center_width, single_only=1)
+		printf "Centered at %s = %.2f mV\r", center_gate, center_gate_mid
 		rampmultiplefdac(fd, sweep_gate, -width*0.5, ramprate=ramprate)	
-		CorrectChargeSensor(fd=fd, fdchannelstr="CSQ", fadcID=fd, fadcchannel=0, check=0, direction=1)  
+		
+		if (cmpstr(center_gate, sweep_gate) == 0)
+			sweepgate_mid = center_gate_mid
+		endif
 	endif
 	
-	ScanFastDACrepeat(fd, mid-width, mid+width, sweep_gate, repeats, sweeprate=sweeprate, ramprate=ramprate, nosave=0, delay=0.01, comments="transition, repeat" + additional_comments)
-	rampmultiplefdac(fd, sweep_gate, mid, ramprate=ramprate)
+	
+	ScanFastDACrepeat(fd, sweepgate_mid-width, sweepgate_mid+width, sweep_gate, repeats, sweeprate=sweeprate, ramprate=ramprate, nosave=0, delay=0.01, comments="transition, repeat" + additional_comments)
+	rampmultiplefdac(fd, sweep_gate, sweepgate_mid, ramprate=ramprate)
 end
 
 function ScanTransitionNoise()

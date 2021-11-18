@@ -65,9 +65,8 @@ function DisplayMultiple(datnums, name_of_wave, [diff, x_label, y_label])
 	string name_of_wave, x_label, y_label
 	variable diff
 
-	svar sc_x_label, sc_y_label
-	x_label = selectstring(paramisdefault(x_label), x_label, sc_x_label)
-	y_label = selectstring(paramisdefault(y_label), y_label, sc_y_label)
+	x_label = selectstring(paramisdefault(x_label), x_label, "")
+	y_label = selectstring(paramisdefault(y_label), y_label, "")
 	
 	string window_name
 	sprintf window_name, "Dats%dto%d", datnums[0], datnums[numpnts(datnums)-1]
@@ -102,9 +101,8 @@ function DisplayWave(w, [x_label, y_label])
 	wave w
 	string x_label, y_label
 	
-	svar sc_x_label, sc_y_label
-	x_label = selectstring(paramisdefault(x_label), x_label, sc_x_label)
-	y_label = selectstring(paramisdefault(y_label), y_label, sc_y_label)
+	x_label = selectstring(paramisdefault(x_label), x_label, "")
+	y_label = selectstring(paramisdefault(y_label), y_label, "")
 	
 	string name, wn = nameofwave(w)
 	sprintf name "%s_", wn

@@ -142,7 +142,7 @@ function CorrectChargeSensor([bd, bdchannelstr, dmmid, fd, fdchannelstr, fadcID,
 	wave/T dacvalstr
 	wave/T fdacvalstr
 
-	natarget = paramisdefault(natarget) ? 725 : natarget   
+	natarget = paramisdefault(natarget) ? 1630 : natarget   
 	direction = paramisdefault(direction) ? 1 : direction
 	zero_tol = paramisdefault(zero_tol) ? 50 : zero_tol  // How close to zero before it starts to get more averaged measurements
 
@@ -185,21 +185,23 @@ function CorrectChargeSensor([bd, bdchannelstr, dmmid, fd, fdchannelstr, fadcID,
 	else
 		current = getfadcChannel(fadcID, fadcchannel, len_avg=0.5)
 	endif
+	
+	variable end_condition = (naTarget == 0) ? zero_tol : 0.03*naTarget   // Either 3% or just an absolute zero_tol given
+	
 	variable avg_len = 0.001// Starting time to avg, will increase as it gets closer to ideal value
-	if (abs((current-natarget)/natarget) > 0.005)  // If more than 0.5% out
+	if (abs(current-natarget) > end_condition/2)  // If more than half the end_condition out
 		do
-
-			//get cdac
+			//get current dac setting
 			if (!paramisdefault(bd))
 				cdac = str2num(dacvalstr[bdchannel][1])
 			else
 				cdac = str2num(fdacvalstr[fdchannel][1])
 			endif
 
-			if (current < nAtarget)
-				nextdac = cdac+0.31*direction  // 0.305... is FastDAC resolution (20000/2^16)
+			if (current < nAtarget)  // Choose next step direction
+				nextdac = cdac+0.32*direction  // 0.305... is FastDAC resolution (20000/2^16)
 			else
-				nextdac = cdac-0.31*direction
+				nextdac = cdac-0.32*direction
 			endif
 
 			if (check==0) //no user input
@@ -224,26 +226,30 @@ function CorrectChargeSensor([bd, bdchannelstr, dmmid, fd, fdchannelstr, fadcID,
 					abort "Computer tried to do bad thing"
 				endif
 			endif
-			//get current
+			
+			//get current after dac step
 			if (!paramisdefault(dmmid))
-				abort
+				abort "Not implemented DMM again"
 //				current = read34401A(dmmid)
 			else
 				current = getfadcChannel(fadcID, fadcchannel, len_avg=avg_len)
 			endif
-			doupdate
-			if (abs((current-nAtarget)/natarget) < 0.05 || abs(current-nAtarget) < zero_tol)
-				avg_len = avg_len*1.2
-			endif
-			if (abs((current-nAtarget)/natarget) < 0.05 || abs(current-nAtarget) < zero_tol && avg_len < 0.2)
+			
+			doupdate  // Update scancontroller window
+			
+			
+			if ((abs(current-nAtarget) < end_condition*3) && avg_len < 0.2)  // If close to end, start averaging for at least 0.2
 				avg_len = 0.2
 			endif
-			if (avg_len > 1)
+			if (abs(current-nAtarget) < end_condition*3)  // Average longer each time when close
+				avg_len = avg_len*1.2
+			endif
+			if (avg_len > 1)  // Max average length = 1s
 				avg_len = 1
 			endif
 //			print avg_len
 			
-		while (abs((current-nAtarget)/natarget) > 0.03 && abs(current-nAtarget) > zero_tol)  // While more than 3% out  
+		while (abs(current-nAtarget) > end_condition)   // Until reaching end condition
 
 		if (!paramisDefault(i))
 			print "Ramped to " + num2str(nextdac) + "mV, at line " + num2str(i)

@@ -1,47 +1,4 @@
-/////////////// Dot Tuning Stuff ///////////////
-
-function DotTuneAround(x, y, width_x, width_y, channelx, channely, [sweeprate, ramprate_x, numptsy, csname])
-// Goes to x, y. Sets charge sensor to target_current. Scans2D around x, y +- width.
-	variable x, y, width_x, width_y, ramprate_x
-	variable sweeprate, numptsy
-	string channelx, channely, csname
-	
-	variable natarget = 556//595//750//287 //1335   // ADC reading in mV to get most sensitive part of CS
-	sweeprate = paramisdefault(sweeprate) ? 300 : sweeprate
-	numptsy = paramisdefault(numptsy) ? 21 : numptsy
-	csname = selectstring(paramisdefault(csname), csname, "CSQ")
-	ramprate_x = paramisdefault(ramprate_x) ? 1000 : ramprate_x
-	
-	
-	nvar fd
-	rampmultiplefdac(fd, channelx, x, ramprate=ramprate_x)
-	rampmultiplefdac(fd, channely, y)
-	
-	CorrectChargeSensor(fd=fd, fdchannelstr=csname, fadcID=fd, fadcchannel=0, check=0, natarget=natarget, direction=1)
-	ScanFastDAC2D(fd, x-width_x, x+width_x, channelx, y-width_y, y+width_y, channely, numptsy, sweeprate=sweeprate, rampratex=ramprate_x, nosave=0, comments="Dot Tuning")
-	wave tempwave = $"cscurrent_2d"
-	nvar filenum
-	displaydiff(tempwave, filenum=filenum-1, x_label=GetLabel(SF_get_channels(channelx, fastdac=1), fastdac=1), y_label=GetLabel(SF_get_channels(channely, fastdac=1), fastdac=1))
-end
-
-
-function checkPinchOffs(instrID, channels, gate_names, ohmic_names, max_bias, [reset_zero, nosave])
-	// Helpful for checking pinch offs
-	// reset_zero: Whether to return gates to 0 bias at end of pinch off (defaults to True)
-	variable instrID, max_bias, reset_zero, nosave
-	string channels, gate_names, ohmic_names
-
-	reset_zero = paramIsDefault(reset_zero) ? 1 : reset_zero  
-
-	string buffer
-	sprintf buffer, "Pinch off, Gates=%s, Ohmics=%s", gate_names, ohmic_names
-	ScanFastDAC(instrID, 0, max_bias, channels, sweeprate=100, x_label=gate_names+" /mV", y_label="Current /nA", comments=buffer, nosave=nosave)	
-	if (reset_zero)
-		rampmultiplefdac(instrID, channels, 0)
-	endif
-end
-
-
+/////////////// Checking Noise /////////////////
 function standardNoiseMeasurement(ca_amp_setting, [instrID, channel, comments, nosave])
 	// Run standard noise measurement (i.e. 5x 12s scans with fastdac reading 12kHz)
 	// ca_amp_setting = amplification on current amp (i.e. for 1e8 enter 8)
@@ -62,50 +19,120 @@ function standardNoiseMeasurement(ca_amp_setting, [instrID, channel, comments, n
 end
 
 
+function QpcStabilitySweeps()
+	// 30 mins of slow sweeping down to pinch off and back to depletion to check QPC is stable (taking 90s per sweep, 10 back and forth sweeps)
+	nvar fd
+	variable pinchoff = -450
+	variable depletion = -50
+	
+	ScanfastDACRepeat(fd, depletion, pinchoff, "CSQ,CSS", 20, sweeprate=abs(depletion-pinchoff)/90, alternate=1, comments="repeat, alternating, checking stability of CS gates", nosave=0)
+	rampmultipleFDAC(fd, "CSQ,CSS", 0)
+end
+
+
+
+function NoiseOnOffTranisiton()
+
+	nvar fd
+	variable mid
+	ScanFastDAC(fd, -100, -180, "CSQ", sweeprate=20, comments="QPC trace before On/Off transition", nosave=0)
+	rampMultipleFDAC(fd, "CSQ", -155)
+	variable i
+	for (i=0; i<30; i++)
+		mid = CenterOnTransition(gate="ACC*400", width=500, single_only=1)
+		printf "Center of transition at ACC*400 = %.2f\r", mid
+		asleep(3)
+		FDacSpectrumAnalyzer(fd,"0",30,numAverage=1,comments="noise, spectrum, On Transition", ca_amp=8)
+		rampmultipleFDAC(fd, "ACC*400", mid-500)
+		asleep(3)
+		FDacSpectrumAnalyzer(fd,"0",30,numAverage=1,comments="noise, spectrum, Off Transition", ca_amp=8)
+		rampmultipleFDAC(fd, "ACC*400", mid)
+	endfor	
+	
+	ScanFastDAC(fd, -100, -180, "CSQ", sweeprate=20, comments="QPC trace after On/Off transition", nosave=0)
+	rampMultipleFDAC(fd, "CSQ", -155)
+end
+
+
+/////////////// Dot Tuning Stuff ///////////////
+function checkPinchOffs(instrID, channels, gate_names, ohmic_names, max_bias, [reset_zero, nosave])
+	// Helpful for checking pinch offs
+	// reset_zero: Whether to return gates to 0 bias at end of pinch off (defaults to True)
+	variable instrID, max_bias, reset_zero, nosave
+	string channels, gate_names, ohmic_names
+
+	reset_zero = paramIsDefault(reset_zero) ? 1 : reset_zero  
+
+	string buffer
+	sprintf buffer, "Pinch off, Gates=%s, Ohmics=%s", gate_names, ohmic_names
+	ScanFastDAC(instrID, 0, max_bias, channels, sweeprate=300, x_label=gate_names+" /mV", y_label="Current /nA", comments=buffer, nosave=nosave)	
+	if (reset_zero)
+		rampmultiplefdac(instrID, channels, 0)
+	endif
+end
+
+
+function DotTuneAround(x, y, width_x, width_y, channelx, channely, [sweeprate, ramprate_x, numptsy, csname])
+// Goes to x, y. Sets charge sensor to target_current. Scans2D around x, y +- width.
+	variable x, y, width_x, width_y, ramprate_x
+	variable sweeprate, numptsy
+	string channelx, channely, csname
+	
+	variable natarget = 1630//595//750//287 //1335   // ADC reading in mV to get most sensitive part of CS
+	sweeprate = paramisdefault(sweeprate) ? 300 : sweeprate
+	numptsy = paramisdefault(numptsy) ? 21 : numptsy
+	csname = selectstring(paramisdefault(csname), csname, "CSQ")
+	ramprate_x = paramisdefault(ramprate_x) ? 1000 : ramprate_x
+	
+	
+	nvar fd
+	rampmultiplefdac(fd, channelx, x, ramprate=ramprate_x)
+	rampmultiplefdac(fd, channely, y)
+	
+	CorrectChargeSensor(fd=fd, fdchannelstr=csname, fadcID=fd, fadcchannel=0, check=0, natarget=natarget, direction=1)
+	ScanFastDAC2D(fd, x-width_x, x+width_x, channelx, y-width_y, y+width_y, channely, numptsy, sweeprate=sweeprate, rampratex=ramprate_x, nosave=0, comments="Dot Tuning")
+	wave tempwave = $"cscurrent_2d"
+	nvar filenum
+	displaydiff(tempwave, filenum=filenum-1, x_label=GetLabel(SF_get_channels(channelx, fastdac=1), fastdac=1), y_label=GetLabel(SF_get_channels(channely, fastdac=1), fastdac=1))
+end
+
+
+// Generally Useful Scan Functions
 function StepTempScanSomething()
 	nvar fd
 	svar ls370
 
-//	make/o targettemps =  {300, 275, 250, 225, 200, 175, 150, 125, 100, 75, 50, 40, 30, 20}
-//	make/o targettemps =  {200, 175, 150, 125, 100, 75, 50, 40, 30, 20}
+	make/o targettemps =  {300, 275, 250, 225, 200, 175, 150, 125, 100, 75, 50, 40, 30, 20}
 //	make/o targettemps =  {300, 250, 200, 150, 100, 75, 50, 35}
-	make/o targettemps =  {75, 50, 35}
-//	make/o targettemps =  {50}
-
-//	make/o targettemps =  {30, 20}
-//	make/o targettemps =  {40, 30, 20}
-//	make/o heaterranges = {3.1, 3.1, 3.1, 3.1, 3.1, 3.1, 1, 1, 1, 1}
-//	make/o heaterranges = {1, 1, 0.31}
 	setLS370exclusivereader(ls370,"mc")
 
-
+	variable width
 	variable i=0
 	do
-//		setLS370temp(xld,targettemps[i], maxcurrent=heaterranges[i])
 		setLS370temp(ls370,targettemps[i])
 		asleep(2.0)
 		WaitTillTempStable(ls370, targettemps[i], 5, 20, 0.10)
 		asleep(60.0)
 		print "MEASURE AT: "+num2str(targettemps[i])+"mK"
 
-//		ScanTransitionMany()
-//		EntropyVsHeaterBias()
-		ScanTransition(sweeprate=25, width=75, repeats=100, center_first=1, center_gate="TDP*40", center_width=40, sweep_gate="TDP*40", csqpc_gate="TDQ", additional_comments="Temp = " + num2str(targettemps[i]) + " mK")
+		// Scan Goes here
+		width = max(100, 4*targettemps[i])
+		ScanTransition(sweeprate=width/5, width=width, repeats=100, center_first=1, center_gate="ACC*2", center_width=10, sweep_gate="ACC*400", csqpc_gate="CSQ", additional_comments="Temp = " + num2str(targettemps[i]) + " mK")
+		//////////////////////
 		i+=1
 	while ( i<numpnts(targettemps) )
 
 	// kill temperature control
 //	setLS370heaterOff(ls370)
-	setLS370temp(ls370,15)
+	setLS370temp(ls370,10)
 	resetLS370exclusivereader(ls370)
 	asleep(60.0*60)
 
-//	ScanTransitionMany()
-//	EntropyVsHeaterBias()
-	ScanTransition(sweeprate=25, width=75, repeats=100, center_first=1, center_gate="TDP*40", center_width=40, sweep_gate="TDP*40", csqpc_gate="TDQ", additional_comments="Temp = 15mK")
+	// Base T Scan goes here
+	width = 100
+	ScanTransition(sweeprate=width/5, width=width, repeats=100, center_first=1, center_gate="ACC*2", center_width=10, sweep_gate="ACC*400", csqpc_gate="CSQ", additional_comments="Temp = 10 mK")
+	/////////////////////////////////
 end
-
-
 
 
 function ScanEntropyRepeat([num, center_first, balance_multiplier, width, hqpc_bias, additional_comments, repeat_multiplier, freq, sweeprate, two_part, repeats, cs_target, center])
@@ -187,7 +214,6 @@ function ScanEntropyRepeat([num, center_first, balance_multiplier, width, hqpc_b
 end
 
 
-
 function ScanTransition([sweeprate, width, ramprate, repeats, center_first, center_gate, center_width, sweep_gate, additional_comments, sweepgate_mid, csqpc_gate])
 	variable sweeprate, width, ramprate, repeats, center_first, center_width, sweepgate_mid
 	string center_gate, sweep_gate, additional_comments, csqpc_gate
@@ -206,22 +232,24 @@ function ScanTransition([sweeprate, width, ramprate, repeats, center_first, cent
 	csqpc_gate = selectstring(paramisdefault(csqpc_gate), csqpc_gate, "CSQ")		
 	
 	if (center_first)
-		rampmultiplefdac(fd, sweep_gate, sweepgate_mid, ramprate=ramprate)
-		CorrectChargeSensor(fd=fd, fdchannelstr=csqpc_gate, fadcID=fd, fadcchannel=0, check=0, direction=1)  
 		variable center_gate_mid
-		center_gate_mid = centerontransition(gate=center_gate, width=center_width, single_only=1)
+		rampmultiplefdac(fd, sweep_gate, sweepgate_mid, ramprate=ramprate)  // Make sure sweep gate is at center
+		CorrectChargeSensor(fd=fd, fdchannelstr=csqpc_gate, fadcID=fd, fadcchannel=0, check=0, direction=1)  // Initial CS correction
+		center_gate_mid = centerontransition(gate=center_gate, width=center_width, single_only=1)  // Initial center
+		rampmultiplefdac(fd, sweep_gate, -width*0.5, ramprate=ramprate)	 // Move off transition
+		CorrectChargeSensor(fd=fd, fdchannelstr=csqpc_gate, fadcID=fd, fadcchannel=0, check=0, direction=1)  // Correct CS close to center
+		rampmultiplefdac(fd, sweep_gate, sweepgate_mid, ramprate=ramprate)	// Go back to center of sweepgate
+		center_gate_mid = centerontransition(gate=center_gate, width=center_width, single_only=1)  // Center again after CS is corrected
 		printf "Centered at %s = %.2f mV\r", center_gate, center_gate_mid
-		rampmultiplefdac(fd, sweep_gate, -width*0.5, ramprate=ramprate)	
-		
 		if (cmpstr(center_gate, sweep_gate) == 0)
 			sweepgate_mid = center_gate_mid
 		endif
 	endif
 	
-	
 	ScanFastDACrepeat(fd, sweepgate_mid-width, sweepgate_mid+width, sweep_gate, repeats, sweeprate=sweeprate, ramprate=ramprate, nosave=0, delay=0.01, comments="transition, repeat" + additional_comments)
 	rampmultiplefdac(fd, sweep_gate, sweepgate_mid, ramprate=ramprate)
 end
+
 
 function ScanTransitionNoise()
 	nvar fd
@@ -251,9 +279,6 @@ end
 function ScanTransitionMany()
 	nvar fd
 	
-//	make/o/free Var1  = {-946, -917, -901, -887, -864, -845, -819, -792}  // ESP
-//	make/o/free Var1b = {-520, -530.5, -536.5, -542.5, -551.5, -559, -569.5, -581.5} // ESS
-//	make/o/free Var1  = {-365, -403, -490, -570, -668, -773}  // ESP
 	make/o/free Var1  = {-305, -343, -430, -510, -608, -713}  // ESP
 	make/o/free Var1b = {-480, -465, -430, -400, -365, -330} // ESS
 	make/o/free Var2 = {0}
@@ -294,3 +319,62 @@ function ScanTransitionMany()
 	print "Finished all scans"
 end
 
+
+
+
+
+///////////////////////////////////////////////////////////////////////////////////////////
+/////////////////////// MISCELLANEOUS /////////////////////////////////////////////////
+//////////////////////////////////////////////////////////////////////////////////
+function DCbiasRepeats(max_current, num_steps, duration, [voltage_ratio])
+	// DCBias measurements with ScanFastDACRepeat at each value (rather than a continuously changing 2D plot)
+	// Note: Assumes already lined up on transition
+	variable max_current // Max current in nA through heater
+	variable num_steps  // Number of steps from 0 -> max_current
+	variable duration  // Duration of scan at each step
+	variable voltage_ratio  // Proportional Voltage to use to offset potential created by current bias (all in mV from DAC)
+	
+	voltage_ratio = paramisDefault(voltage_ratio) ? 1.5038 : voltage_ratio
+	variable current_resistor = 10 // Mohms of resistance current bias is driven through
+	variable scan_width = 1000
+	variable rampratex = 100000
+	variable sweeprate = 2000
+	string current_channel = "OHC(10M)"
+	string voltage_channel = "OHV*1000"
+	
+	nvar fd
+	string comments
+	variable repeats
+	
+	repeats = round((duration/(scan_width*2/sweeprate)))  // Desired duration / (scan width/sweeprate)
+	
+	// Measure with zero bias
+	rampmultipleFDAC(fd, current_channel, 0)
+	rampmultipleFDAC(fd, voltage_channel, 0)
+	sprintf comments, "DCbias Repeat, zero bias"
+	ScanFastDACRepeat(fd, -scan_width, scan_width, "ACC*400", repeats, ramprate=rampratex, sweeprate=sweeprate, comments=comments, nosave=0)
+	
+	// Measure with non-zero bias
+	variable setpoint
+	variable i
+	for (i=1; i<num_steps+1; i++)  // Start from 1 for only non-zero bias
+		setpoint = i*(max_current*10/num_steps)
+		
+		// Measure positive bias
+		rampmultipleFDAC(fd, current_channel, setpoint)
+		rampmultipleFDAC(fd, voltage_channel, -setpoint*voltage_ratio)
+		sprintf comments, "DCbias Repeat, %.3f nA" setpoint/current_resistor
+		ScanFastDACRepeat(fd, -scan_width, scan_width, "ACC*400", repeats, ramprate=rampratex, sweeprate=sweeprate, comments=comments, nosave=0)
+		
+		// Measure negative bias
+		rampmultipleFDAC(fd, current_channel, -setpoint)
+		rampmultipleFDAC(fd, voltage_channel, setpoint*voltage_ratio)
+		sprintf comments, "DCbias Repeat, %.3f nA" -setpoint/current_resistor
+		ScanFastDACRepeat(fd, -scan_width, scan_width, "ACC*400", repeats, ramprate=rampratex, sweeprate=sweeprate, comments=comments, nosave=0)
+
+	endfor
+
+	// Return to zero heating
+	rampmultipleFDAC(fd, current_channel, 0)
+	rampmultipleFDAC(fd, voltage_channel, 0)
+end

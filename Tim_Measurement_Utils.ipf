@@ -16,7 +16,7 @@ function SetupEntropySquareWaves([freq, cycles, hqpc_plus, hqpc_minus, channel_r
 	cycles = paramisdefault(cycles) ? 1 : cycles
 	hqpc_plus = paramisdefault(hqpc_plus) ? 50 : hqpc_plus
 	hqpc_minus = paramisdefault(hqpc_minus) ? -50 : hqpc_minus
-	channel_ratio = paramisdefault(channel_ratio) ? -1.952 : channel_ratio  //Using HO1/10M, H02/1000
+	channel_ratio = paramisdefault(channel_ratio) ? -1.503 : channel_ratio  //Using OHC, OHV
 	ramplen = paramisdefault(ramplen) ? 0 : ramplen
 	
 	nvar fd
@@ -33,7 +33,8 @@ function SetupEntropySquareWaves([freq, cycles, hqpc_plus, hqpc_minus, channel_r
 		
 	// Setup AWG
 //	fdAWG_setup_AWG(fd, AWs="0,1", DACs="R2T/0.001,TC/0.001", numCycles=cycles)
-	fdAWG_setup_AWG(fd, AWs="0,1", DACs="HO1/10M,HO2/1000", numCycles=cycles)
+//	fdAWG_setup_AWG(fd, AWs="0,1", DACs="HO1/10M,HO2/1000", numCycles=cycles)
+	fdAWG_setup_AWG(fd, AWs="0,1", DACs="OHC(10M),OHV*1000", numCycles=cycles)
 end
 	
 
@@ -186,7 +187,7 @@ function CorrectChargeSensor([bd, bdchannelstr, dmmid, fd, fdchannelstr, fadcID,
 		current = getfadcChannel(fadcID, fadcchannel, len_avg=0.5)
 	endif
 	
-	variable end_condition = (naTarget == 0) ? zero_tol : 0.03*naTarget   // Either 3% or just an absolute zero_tol given
+	variable end_condition = (naTarget == 0) ? zero_tol : 0.05*naTarget   // Either 5% or just an absolute zero_tol given
 	
 	variable avg_len = 0.001// Starting time to avg, will increase as it gets closer to ideal value
 	if (abs(current-natarget) > end_condition/2)  // If more than half the end_condition out

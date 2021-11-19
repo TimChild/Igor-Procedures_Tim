@@ -97,7 +97,9 @@ function DotTuneAround(x, y, width_x, width_y, channelx, channely, [sweeprate, r
 end
 
 
-// Generally Useful Scan Functions
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////// Generally Useful Scan Functions ///////////////////////////////////////////////////////////////////////////
 function StepTempScanSomething()
 	nvar fd
 	svar ls370
@@ -150,6 +152,11 @@ function ScanEntropyRepeat([num, center_first, balance_multiplier, width, hqpc_b
 	two_part = paramisdefault(two_part) ? 							0 : two_part
 	center = paramisdefault(center) ? 								0 : center
 
+	string sweepgate = "ACC*400"
+	variable sweepgate_center_width = 500
+	string centergate = "ACC*2"
+	variable center_width = 30
+
 	if (two_part == 1 && !paramisdefault(repeats))
 		abort "repeats is only meant to be set for a one part scan, not two part"
 	endif
@@ -173,16 +180,16 @@ function ScanEntropyRepeat([num, center_first, balance_multiplier, width, hqpc_b
 
 	variable mid, r
 	if (center_first)
-		rampmultiplefdac(fd, "ACC/100", center)
-		centerontransition(gate="ESP", width=30)
-		rampmultiplefdac(fd, "ACC/100", center-200)
+		rampmultiplefdac(fd, sweepgate, center)
+		centerontransition(gate=centergate, width=center_width)
+		rampmultiplefdac(fd, sweepgate, center-200)
 		if (!paramisdefault(cs_target))
 			CorrectChargeSensor(fd=fd, fdchannelstr="CSQ", fadcID=fd, fadcchannel=0, check=0, direction=1, natarget=cs_target)		
 		else
 			CorrectChargeSensor(fd=fd, fdchannelstr="CSQ", fadcID=fd, fadcchannel=0, check=0, direction=1)		
 		endif
-		rampmultiplefdac(fd, "ACC/100", center)
-		mid = centerontransition(gate="ACC/100", width=200, single_only=1)
+		rampmultiplefdac(fd, sweepgate, center)
+		mid = centerontransition(gate=sweepgate, width=sweepgate_center_width, single_only=1)
 		if (numtype(mid) == 2)
 			mid = center
 		endif
@@ -198,17 +205,17 @@ function ScanEntropyRepeat([num, center_first, balance_multiplier, width, hqpc_b
 			printf "Starting scan %d of %d\r", i, num
 		endif 	
 		if (two_part == 1)
-			ScanFastDACrepeat(fd, mid-width1, mid+width1, "ACC/100", repeats1, sweeprate=sweeprate, delay=0.2, comments=comments+", part1of2", use_awg=1, nosave=nosave)							
-			ScanFastDACrepeat(fd, mid-width2, mid+width2, "ACC/100", repeats2, sweeprate=sweeprate, delay=0.2, comments=comments+", part2of2", use_awg=1, nosave=nosave)			
+			ScanFastDACrepeat(fd, mid-width1, mid+width1, sweepgate, repeats1, sweeprate=sweeprate, delay=0.2, comments=comments+", part1of2", use_awg=1, nosave=nosave)							
+			ScanFastDACrepeat(fd, mid-width2, mid+width2, sweepgate, repeats2, sweeprate=sweeprate, delay=0.2, comments=comments+", part2of2", use_awg=1, nosave=nosave)			
 		else
 			if (!paramisDefault(repeats) && repeats > 0)
 				r = repeats
 			else
 				r = repeats2
 			endif
-			ScanFastDACrepeat(fd, mid-width1, mid+width1, "ACC/100", r, sweeprate=sweeprate, delay=0.2, comments=comments, use_awg=1, nosave=nosave)						
+			ScanFastDACrepeat(fd, mid-width1, mid+width1, sweepgate, r, sweeprate=sweeprate, delay=0.2, comments=comments, use_awg=1, nosave=nosave)						
 		endif
-		rampmultiplefdac(fd, "ACC/100", mid)	
+		rampmultiplefdac(fd, sweepgate, mid)	
 		i++
 	while (i<num)
 end
@@ -279,8 +286,8 @@ end
 function ScanTransitionMany()
 	nvar fd
 	
-	make/o/free Var1  = {-305, -343, -430, -510, -608, -713}  // ESP
-	make/o/free Var1b = {-480, -465, -430, -400, -365, -330} // ESS
+	make/o/free Var1  = {-440, 	-410,	-400,	-385,	-356,	-331,	-307,	-281,	-257,	-231,	-205}  // ACC*2
+	make/o/free Var1b = {-25, 	-100,	-150,	-200,	-300,	-400,	-500,	-600,	-700,	-800,	-900}  // SDP
 	make/o/free Var2 = {0}
 	make/o/free Var3 = {0,0,0,0,0,0,0,0,0,0}
 	
@@ -289,7 +296,7 @@ function ScanTransitionMany()
 	variable istart, jstart, kstart
 	
 	// Starts
-	istart=0; jstart=0; kstart=0
+	istart=1; jstart=0; kstart=0
 	
 	// Fins
 	ifin=ifin; jfin=jfin; kfin=kfin
@@ -306,11 +313,12 @@ function ScanTransitionMany()
 			jstart = 0 
 			for(i=istart;i<ifin;i++) // Loop for changing i var1 and running scan
 				istart = 0 
-				printf "Starting scan at i=%d, ESS = %.1fmV \r", i, Var1b[i]
-				rampmultiplefdac(fd, "ESP", Var1[i])
-				rampmultiplefdac(fd, "ESS", Var1b[i])
-				for(repeats=0;repeats<3;repeats++)
-					// Do Scan here
+				printf "Starting scan at i=%d, SDP = %.1fmV \r", i, Var1b[i]
+				rampmultiplefdac(fd, "ACC*2", Var1[i])
+				rampmultiplefdac(fd, "SDP", Var1b[i])
+				for(repeats=0;repeats<1;repeats++)
+//					ScanEntropyRepeat(num=1, center_first=1, balance_multiplier=1, width=200, hqpc_bias=25, additional_comments="0->1 transition", repeat_multiplier=1, freq=12.5, sweeprate=25, two_part=0, repeats=5, center=0)
+					ScanTransition(sweeprate=25, width=400, repeats=2, center_first=1, center_gate="ACC*2", center_width=20, sweep_gate="ACC*400", additional_comments="rough check before entropy scans", sweepgate_mid=0, csqpc_gate="CSQ")
 				endfor
 			endfor
 		endfor
@@ -320,7 +328,10 @@ function ScanTransitionMany()
 end
 
 
+function ScanAlongTransition()
+	
 
+end
 
 
 ///////////////////////////////////////////////////////////////////////////////////////////

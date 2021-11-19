@@ -16,7 +16,8 @@ function SetupEntropySquareWaves([freq, cycles, hqpc_plus, hqpc_minus, channel_r
 	cycles = paramisdefault(cycles) ? 1 : cycles
 	hqpc_plus = paramisdefault(hqpc_plus) ? 50 : hqpc_plus
 	hqpc_minus = paramisdefault(hqpc_minus) ? -50 : hqpc_minus
-	channel_ratio = paramisdefault(channel_ratio) ? -1.952 : channel_ratio  //Using HO1/10M, H02/1000
+	channel_ratio = paramisdefault(channel_ratio) ? -1.531 : channel_ratio  //Using HO1/10M, H02/1000
+//	channel_ratio = paramisdefault(channel_ratio) ? -0.281 : channel_ratio  //Using HO1/10M, H02/1000
 	ramplen = paramisdefault(ramplen) ? 0 : ramplen
 	
 	nvar fd
@@ -33,21 +34,23 @@ function SetupEntropySquareWaves([freq, cycles, hqpc_plus, hqpc_minus, channel_r
 		
 	// Setup AWG
 //	fdAWG_setup_AWG(fd, AWs="0,1", DACs="R2T/0.001,TC/0.001", numCycles=cycles)
-	fdAWG_setup_AWG(fd, AWs="0,1", DACs="HO1/10M,HO2/1000", numCycles=cycles)
+	fdAWG_setup_AWG(fd, AWs="0,1", DACs="HO1/10M,HO2*1000", numCycles=cycles)
 end
 	
 
-function SetupEntropySquareWaves_unequal([freq, cycles, hqpc_plus, hqpc_minus, ratio_plus, ratio_minus, balance_multiplier, hqpc_bias_multiplier])
-	variable freq, cycles, hqpc_plus, hqpc_minus, ratio_plus, ratio_minus, balance_multiplier, hqpc_bias_multiplier
+function SetupEntropySquareWaves_unequal([freq, cycles, hqpc_plus, hqpc_minus, ratio_plus, ratio_minus, balance_multiplier, hqpc_bias_multiplier, ramplen])
+	variable freq, cycles, hqpc_plus, hqpc_minus, ratio_plus, ratio_minus, balance_multiplier, hqpc_bias_multiplier, ramplen
 	
 	balance_multiplier = paramIsDefault(balance_multiplier) ? 1 : balance_multiplier
 	hqpc_bias_multiplier = paramIsDefault(hqpc_bias_multiplier) ? 1 : hqpc_bias_multiplier
-	freq = paramisdefault(freq) ? 45 : freq
+	freq = paramisdefault(freq) ? 12.5 : freq
 	cycles = paramisdefault(cycles) ? 1 : cycles
-	hqpc_plus = paramisdefault(hqpc_plus) ? 500 : hqpc_plus
-	hqpc_minus = paramisdefault(hqpc_minus) ? -500 : hqpc_minus
-	ratio_plus = paramisdefault(ratio_plus) ? -0.1666 : ratio_plus
-	ratio_minus = paramisdefault(ratio_minus) ? -0.17 : ratio_minus
+	hqpc_plus = paramisdefault(hqpc_plus) ? 50 : hqpc_plus
+	hqpc_minus = paramisdefault(hqpc_minus) ? -50 : hqpc_minus
+	ratio_plus = paramisdefault(ratio_plus) ? -1.531 : ratio_plus
+	ratio_minus = paramisdefault(ratio_minus) ? -1.531 : ratio_minus
+	ramplen = paramisdefault(ramplen) ? 0 : ramplen
+
 	nvar fd
 
 	variable splus = hqpc_plus*hqpc_bias_multiplier, sminus=hqpc_minus*hqpc_bias_multiplier	
@@ -56,12 +59,12 @@ function SetupEntropySquareWaves_unequal([freq, cycles, hqpc_plus, hqpc_minus, r
 	variable spt
 	// Make square wave 0
 	spt = 1/(4*freq)  // Convert from freq to setpoint time /s  (4 because 4 setpoints per wave)
-	fdAWG_make_multi_square_wave(fd, 0, splus, sminus, spt, spt, spt, 0)
+	fdAWG_make_multi_square_wave(fd, 0, splus, sminus, spt, spt, spt, 0, ramplen=ramplen)
 	// Make square wave 1
-	fdAWG_make_multi_square_wave(fd, 0, cplus, cminus, spt, spt, spt, 1)
+	fdAWG_make_multi_square_wave(fd, 0, cplus, cminus, spt, spt, spt, 1, ramplen=ramplen)
 		
 	// Setup AWG
-	fdAWG_setup_AWG(fd, AWs="0,1", DACs="R2T/0.001,TC/0.001", numCycles=cycles)
+	fdAWG_setup_AWG(fd, AWs="0,1", DACs="HO1/10M,HO2*1000", numCycles=cycles)
 end
 
 
@@ -133,6 +136,69 @@ function loadFromHDF(datnum, [no_check])
 	fdLoadFromHDF(datnum, no_check = no_check)
 end
 
+
+////////////////////////////// Charge sensor functions ///////////////////////////////////////
+
+
+function GetTargetCSCurrent([oldcscurr, lower_lim, upper_lim, nosave])
+// A rough outline for a new correctchargesensor function. Currently relies on defaults in CorrectChargeSensor
+// To be implemented into CorrectChargeSensor after some testing
+	variable oldcscurr, lower_lim, upper_lim, nosave
+	nvar fd
+	string channelstr = "CSQ"
+
+	channelstr = SF_get_channels(channelstr, fastdac=1)
+	
+	lower_lim = paramisdefault(lower_lim) ? 4 : lower_lim
+	upper_lim = paramisdefault(upper_lim) ? 9 : upper_lim
+	nosave = paramisdefault(nosave) ? 1 : nosave
+	
+	// Begin by calling CorrectChargeSensor with default things
+	if (paramisDefault(oldcscurr))
+		CorrectChargeSensor(fd=fd, fdchannelstr=channelstr, fadcID=fd, fadcchannel=0, check=0, direction=1)  
+		oldcscurr = getFADCvalue(fd, 0, len_avg=0.3)
+	else
+		CorrectChargeSensor(fd=fd, fdchannelstr=channelstr, fadcID=fd, fadcchannel=0, check=0, direction=1, natarget=oldcscurr) 
+	endif 
+	
+	// Get the current value of CSQ
+	wave/T fdacvalstr
+	variable oldcenter = str2num(fdacvalstr[str2num(channelstr)][1])
+	
+	// Sweep CSQ +/- 20 mV around the current setting to get the charge sensor curve
+	ScanFastDAC(fd, oldcenter-20, oldcenter+20, channelstr, numpts=10000, nosave=nosave, comments="Finding steepest part of CSQ, CSQ scan")
+	wave cscurrent
+	
+	duplicate/o/free cscurrent cscurrentdiff
+	cscurrentdiff = (lower_lim < cscurrent[p] && cscurrent[p] < upper_lim) ? cscurrent[p] : NaN
+	wavestats/Q cscurrentdiff
+	resample/DOWN=(floor((V_npnts)/50)) cscurrentdiff
+	differentiate cscurrentdiff
+	smooth 10, cscurrentdiff
+	
+	wavestats/Q cscurrentdiff
+	variable newcenter = V_maxloc
+	
+	// If Igor gives garbage, go back to the original center and return
+	if(newcenter > oldcenter + 30 || newcenter < oldcenter - 30)
+		rampmultiplefdac(fd, channelstr, oldcenter)
+		printf "WARNING [GetTargetCSCurrent]: Thought center of CS trace was at %.1fmV, centering at %.1fmV\n", newcenter, oldcenter
+		return oldcscurr
+	endif
+	
+	rampmultiplefdac(fd, channelstr, newcenter)
+	variable newcscurr = getFADCvalue(fd, 0, len_avg=0.3)
+	
+	// If a strangely small or large cscurrent, ramp back to center and return
+	if(newcscurr > upper_lim || newcscurr < lower_lim)
+		rampmultiplefdac(fd, channelstr, oldcenter)
+		printf "WARNING [GetTargetCSCurrent]: Thought natarget was at %.1fmV, using %.1fmV\n", newcscurr, oldcscurr
+		return oldcscurr
+	endif
+	
+	return newcscurr
+end
+
 function CorrectChargeSensor([bd, bdchannelstr, dmmid, fd, fdchannelstr, fadcID, fadcchannel, i, check, natarget, direction, zero_tol])
 //Corrects the charge sensor by ramping the CSQ in 1mV steps 
 //(direction changes the direction it tries to correct in)
@@ -142,9 +208,9 @@ function CorrectChargeSensor([bd, bdchannelstr, dmmid, fd, fdchannelstr, fadcID,
 	wave/T dacvalstr
 	wave/T fdacvalstr
 
-	natarget = paramisdefault(natarget) ? 725 : natarget   
+	natarget = paramisdefault(natarget) ? 7 : natarget   // 7.04 when bias at 300 // 7.25
 	direction = paramisdefault(direction) ? 1 : direction
-	zero_tol = paramisdefault(zero_tol) ? 50 : zero_tol  // How close to zero before it starts to get more averaged measurements
+	zero_tol = paramisdefault(zero_tol) ? 0.5 : zero_tol  // How close to zero before it starts to get more averaged measurements
 
 	if ((paramisdefault(bd) && paramisdefault(fd)) || !paramisdefault(bd) && !paramisdefault(fd))
 		abort "Must provide either babydac OR fastdac id"
@@ -182,7 +248,7 @@ function CorrectChargeSensor([bd, bdchannelstr, dmmid, fd, fdchannelstr, fadcID,
 	if (!paramisdefault(dmmid))
 		current = read34401A(dmmid)
 	else
-		current = getfadcChannel(fadcID, fadcchannel, len_avg=0.5)
+		current = getFADCvalue(fadcID, fadcchannel, len_avg=0.5)
 	endif
 	variable avg_len = 0.003// Starting time to avg, will increase as it gets closer to ideal value
 	if (abs((current-natarget)/natarget) > 0.005)  // If more than 0.5% out
@@ -191,6 +257,7 @@ function CorrectChargeSensor([bd, bdchannelstr, dmmid, fd, fdchannelstr, fadcID,
 			//get cdac
 			if (!paramisdefault(bd))
 				cdac = str2num(dacvalstr[bdchannel][1])
+				
 			else
 				cdac = str2num(fdacvalstr[fdchannel][1])
 			endif
@@ -227,7 +294,7 @@ function CorrectChargeSensor([bd, bdchannelstr, dmmid, fd, fdchannelstr, fadcID,
 			if (!paramisdefault(dmmid))
 				current = read34401A(dmmid)
 			else
-				current = getfadcChannel(fadcID, fadcchannel, len_avg=avg_len)
+				current = getFADCvalue(fadcID, fadcchannel, len_avg=avg_len)
 			endif
 			doupdate
 			if (abs((current-nAtarget)/natarget) < 0.05 || abs(current-nAtarget) < zero_tol)
@@ -241,7 +308,7 @@ function CorrectChargeSensor([bd, bdchannelstr, dmmid, fd, fdchannelstr, fadcID,
 			endif
 //			print avg_len
 			
-		while (abs((current-nAtarget)/natarget) > 0.03 && abs(current-nAtarget) > 5)  // While more than 3% out  
+		while (abs((current-nAtarget)/natarget) > 0.03 && abs(current-nAtarget) > 0.05)  // While more than 3% out  
 
 		if (!paramisDefault(i))
 			print "Ramped to " + num2str(nextdac) + "mV, at line " + num2str(i)
@@ -249,37 +316,8 @@ function CorrectChargeSensor([bd, bdchannelstr, dmmid, fd, fdchannelstr, fadcID,
 	endif
 end
 
-function WaitTillTempStable(instrID, targetTmK, times, delay, err)
-	// instrID is the lakeshore controller ID
-	// targetmK is the target temperature in mK
-	// times is the number of readings required to call a temperature stable
-	// delay is the time between readings
-	// err is a percent error that is acceptable in the readings
-	string instrID
-	variable targetTmK, times, delay, err
-	variable passCount, targetT=targetTmK/1000, currentT = 0
 
-	// check for stable temperature
-	print "Target temperature: ", targetTmK, "mK"
-
-	variable j = 0
-	for (passCount=0; passCount<times; )
-		asleep(delay)
-		for (j = 0; j<10; j+=1)
-			currentT += getLS370temp(instrID, "mc")/10 // do some averaging
-			asleep(2.1)
-		endfor
-		if (ABS(currentT-targetT) < err*targetT)
-			passCount+=1
-			print "Accepted", passCount, " @ ", currentT, "K"
-		else
-			print "Rejected", passCount, " @ ", currentT, "K"
-			passCount = 0
-		endif
-		currentT = 0
-	endfor
-end
-
+////////////////////////////////// Centering Functions ////////////////////
 
 function FindTransitionMid(dat, [threshold]) //Finds mid by differentiating, returns minloc
 	wave dat
@@ -316,8 +354,8 @@ function FindTransitionMid(dat, [threshold]) //Finds mid by differentiating, ret
 end
 
 
-function centerontransition([gate, width, single_only])
-	string gate
+function CenterOnTransition([gate, virtual_gates, width, single_only])
+	string gate, virtual_gates
 	variable width, single_only
 	
 	nvar fd
@@ -348,5 +386,45 @@ function centerontransition([gate, width, single_only])
 	endif
 	return mid
 end
+
+
+
+
+/////////////////////////////////// Other useful functions //////////////////////////////
+
+
+function WaitTillTempStable(instrID, targetTmK, times, delay, err)
+	// instrID is the lakeshore controller ID
+	// targetmK is the target temperature in mK
+	// times is the number of readings required to call a temperature stable
+	// delay is the time between readings
+	// err is a percent error that is acceptable in the readings
+	string instrID
+	variable targetTmK, times, delay, err
+	variable passCount, targetT=targetTmK/1000, currentT = 0
+
+	// check for stable temperature
+	print "Target temperature: ", targetTmK, "mK"
+
+	variable j = 0
+	for (passCount=0; passCount<times; )
+		asleep(delay)
+		for (j = 0; j<10; j+=1)
+			currentT += getLS370temp(instrID, "mc")/10 // do some averaging
+			asleep(2.1)
+		endfor
+		if (ABS(currentT-targetT) < err*targetT)
+			passCount+=1
+			print "Accepted", passCount, " @ ", currentT, "K"
+		else
+			print "Rejected", passCount, " @ ", currentT, "K"
+			passCount = 0
+		endif
+		currentT = 0
+	endfor
+end
+
+
+
 
 

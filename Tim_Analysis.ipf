@@ -3,6 +3,110 @@
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 
+/////////////////////////////// Noise Spectrum ///////////////////////
+
+function/wave IntegrateNoise(wv, dur)
+	// Input 
+	// wv: PSD or any wave that needs to be integrated and normalized
+	// dur: time in seconds of sampling
+	// Comments
+	// Meant to be used with DSPPeriodogram set to normalize using PARS (Parseval's Thm)
+	// dur would be duration of the time series passed into DSPPeriodogram 
+	wave wv
+	variable dur
+	string wnname = nameofwave(wv) + "_int"
+	duplicate/o wv $wnname
+	wave intwv = $wnname
+	integrate intwv
+//	intwv = intwv*dur
+	return intwv
+end
+
+
+function DisplayIntegratedNoise(sa_num, [text_label, show_smoothed])
+	variable sa_num, show_smoothed
+	string text_label
+	
+	if (sa_num < 0)
+		nvar sanum
+		sa_num = sanum-1
+	endif
+	
+	string wn = "sasaved"+num2str(sa_num)
+	string wn_lin = "sasavedlin"+num2str(sa_num)
+	string wn_int = wn_lin + "_int"
+	string wn_lin_smooth = wn_lin+"_smoothed"
+//	display $wn
+//	Label left "PSD dBnA/sqrt(Hz)"
+//	Label bottom "Frequency /Hz"
+
+	
+	display $wn_lin
+//	Label left "PSD dBnA/sqrt(Hz)"
+	Label left "PSD nA^2/Hz"
+	Label bottom "Frequency /Hz"
+	ModifyGraph log(left)=1
+	
+	if (show_smoothed !=0)
+		duplicate/o $wn_lin $wn_lin_smooth 
+		appendToGraph $wn_lin_smooth
+		wavestats/q $wn_lin_smooth
+		resample/down=(round(v_npnts/1000)) $wn_lin_smooth 
+		ModifyGraph rgb($wn_lin_smooth)=(4369,4369,4369)
+	endif
+	
+	appendtograph/r $wn_int
+	Label right "Int PSD nA^2"
+	TextBox/C/N=SA_num/A=LT "SA"+num2str(sa_num)
+	ModifyGraph rgb($wn_int)=(1,4,52428)
+	
+	if (!paramisdefault(text_label))
+		textbox/C/N=text_label text_label
+	endif
+
+end
+
+
+function PlotNoiseSpectrogram(numstart, numfinish, [measureFreq, stepSize])
+// Make a 2D plot of single lines from a bunch of noise spectra
+	variable numstart, numfinish
+	variable measureFreq, stepSize
+	nvar fd
+	
+	measureFreq = paramisdefault(measureFreq) ? getfadcspeed(fd) : measureFreq
+	stepSize = paramisdefault(stepSize) ? 1 : stepSize
+	
+	string start = num2str(numstart)
+	string finish = num2str(numfinish)
+	variable numspectra = floor((numfinish+1-numstart)/stepsize)
+	
+	string tempspectra_wn = "SAsaved" + start
+	wave tempspectra = $tempspectra_wn
+	
+	string wn = "spectrogram_" + start + "_" + finish +"_2D"
+	Make/O/N=(numpnts(tempspectra), numspectra) $wn
+	wave sgram = $wn
+	
+	variable i
+	for(i = 0; i < numspectra; i++)
+		tempspectra_wn = "SAsaved" + num2str(i*stepSize+numstart)
+		wave tempspectra = $tempspectra_wn
+		sgram[][i] = tempspectra[p]
+	endfor
+	
+	// Plot result
+	display; appendimage $wn
+	ModifyImage $wn ctab= {*,*,RedWhiteBlue,0}
+	TextBox/C/N=textid/A=LT/X=1.00/Y=1.00/E=2 wn	
+	ColorScale/C/N=text1/A=RC/E image=$wn
+	setscale/i x, 0, measureFreq/(2.0), $wn
+	Label left "Repeats"
+	Label bottom "Frequency /Hz"
+
+end
+
+
+
 ///////////////////////////////// Display/Analysis Functions ////////////////
 
 function DisplayDiff(w, [x_label, y_label, filenum])
@@ -102,7 +206,8 @@ function DisplayWave(w, [x_label, y_label])
 	setwindow kwTopWin, graphicsTech=0
 	appendimage $wn
 	modifyimage $wn ctab={*, *, $sc_ColorMap, 0}
-	colorscale /c/n=$sc_ColorMap /e/a=rc
+//	colorscale /c/n=$sc_ColorMap /e/a=rc
+	ColorScale/C/N=colorbar/A=RC/E image=$wn
 	Label left, y_label
 	Label bottom, x_label
 	TextBox/W=$name/C/N=textid/A=LT/X=1.00/Y=1.00/E=2 name

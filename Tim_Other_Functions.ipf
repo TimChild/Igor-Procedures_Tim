@@ -112,3 +112,35 @@ function makecolorful([rev, nlines])
 		index+=1
 	while(index<=num)
 end
+
+
+function/wave Linspace(start, fin, num)
+	// To use this in command line:
+	//		make/o/n=num tempwave
+	// 		tempwave = linspace(start, fin, num)[p]
+	//
+	// To use in a function: 
+	//		wave tempwave = linspace(start, fin, num)  //Can be done ONCE (each linspace overwrites itself!)
+	//	or 
+	//		make/n=num tempwave = linspace(start, fin, num)[p]  //Can be done MANY times
+	//
+	// To combine linspaces:
+	//		make/free/o/n=num1 w1 = linspace(start1, fin1, num1)[p]
+	//		make/free/o/n=num2 w2 = linspace(start2, fin2, num2)[p]
+	//		concatenate/np/o {w1, w2}, tempwave
+	//
+	variable start, fin, num
+	Make/N=2/O/Free linspace_start_end = {start, fin}
+	Interpolate2/T=1/N=(num)/Y=linspaced linspace_start_end
+	return linspaced
+end
+
+function test_func()
+
+//	wave tempwave_test = linspace(0, 100, 21)
+	make/o/free/n=5 w1 = linspace(0, 10, 5)[p]
+	make/o/free/n=5 w2 = linspace(20, 50, 5)[p]
+	concatenate/np/o {w1, w2}, tempwave_test
+	print tempwave_test
+
+end

@@ -122,23 +122,11 @@ end
 
 
 
-//////////////////////////////////////////////////////////////////////////
-//////////////////////////////////////////////////////////////////////////
-//////////////////////////////////////////////////////////////////////////
 
 
-
-
-function loadFromHDF(datnum, [no_check])
-	variable datnum, no_check
-
-	bdLoadFromHDF(datnum, no_check = no_check)
-	fdLoadFromHDF(datnum, no_check = no_check)
-end
-
-
+////////////////////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////// Charge sensor functions ///////////////////////////////////////
-
+////////////////////////////////////////////////////////////////////////////////////////////////
 
 function GetTargetCSCurrent([oldcscurr, lower_lim, upper_lim, nosave])
 // A rough outline for a new correctchargesensor function. Currently relies on defaults in CorrectChargeSensor
@@ -198,6 +186,8 @@ function GetTargetCSCurrent([oldcscurr, lower_lim, upper_lim, nosave])
 
 	return newcscurr
 end
+
+
 
 function CorrectChargeSensor([bd, bdchannelstr, dmmid, fd, fdchannelstr, fadcID, fadcchannel, i, check, natarget, direction, zero_tol])
 //Corrects the charge sensor by ramping the CSQ in 1mV steps
@@ -324,8 +314,9 @@ function CorrectChargeSensor([bd, bdchannelstr, dmmid, fd, fdchannelstr, fadcID,
 	endif
 end
 
-
-////////////////////////////////// Centering Functions ////////////////////
+////////////////////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////// Centering Functions ////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////////////////////
 
 function FindTransitionMid(dat, [threshold]) //Finds mid by differentiating, returns minloc
 	wave dat
@@ -396,6 +387,20 @@ function CenterOnTransition([gate, virtual_gates, width, single_only])
 end
 
 
+//////////////////////////////////////////////////////////////////////////////////////////
+////////////////////////// Miscellaneous ////////////////////////////////////////////////
+//////////////////////////////////////////////////////////////////////////////////////////
+
+
+function loadFromHDF(datnum, [no_check])
+	variable datnum, no_check
+
+	bdLoadFromHDF(datnum, no_check = no_check)
+	fdLoadFromHDF(datnum, no_check = no_check)
+end
+
+
+
 function saveLogsOnly([msg])
 	string msg
 	variable save_experiment // Default: Do not save experiment for just this
@@ -414,8 +419,6 @@ function saveLogsOnly([msg])
 	initcloseSaveFiles(num2str(hdfid))
 end
 
-
-/////////////////////////////////// Other useful functions //////////////////////////////
 
 
 function WaitTillTempStable(instrID, targetTmK, times, delay, err)
@@ -447,4 +450,72 @@ function WaitTillTempStable(instrID, targetTmK, times, delay, err)
 		endif
 		currentT = 0
 	endfor
+end
+
+
+function/T get_virtual_scan_params(mid, width1, virtual_mids, ratios)
+	variable mid, width1
+	string virtual_mids, ratios
+	
+	abort "2021/11 -- Somehow this function got lost, will need to be remade to be used again"
+end
+
+
+
+function udh5()
+	// Very old function for loading HDF files back into Igor. Need a new version of this
+	abort "Too old to trust, need to be updated or at least checked carefully"
+	string infile = wavelist("*",";","") // get wave list
+	string hdflist = indexedfile(data,-1,".h5") // get list of .h5 files
+
+	string currentHDF="", currentWav="", datasets="", currentDS
+	variable numHDF = itemsinlist(hdflist), fileid=0, numWN = 0, wnExists=0
+
+	variable i=0, j=0, numloaded=0
+
+	for(i=0; i<numHDF; i+=1) // loop over h5 filelist
+
+	   currentHDF = StringFromList(i,hdflist)
+
+		HDF5OpenFile/P=data /R fileID as currentHDF
+		HDF5ListGroup /TYPE=2 /R=1 fileID, "/" // list datasets in root group
+		datasets = S_HDF5ListGroup
+		numWN = itemsinlist(datasets)
+		currentHDF = currentHDF[0,(strlen(currentHDF)-4)]
+		for(j=0; j<numWN; j+=1) // loop over datasets within h5 file
+			currentDS = StringFromList(j,datasets)
+			currentWav = currentHDF+currentDS
+		   wnExists = FindListItem(currentWav, infile,  ";")
+		   if (wnExists==-1)
+		   	// load wave from hdf
+		   	HDF5LoadData /Q /IGOR=-1 /N=$currentWav fileID, currentDS
+		   	numloaded+=1
+		   endif
+		endfor
+		HDF5CloseFile fileID
+	endfor
+
+   print numloaded, "waves uploaded"
+end
+
+
+function/wave Linspace(start, fin, num)
+	// To use this in command line:
+	//		make/o/n=num tempwave
+	// 		tempwave = linspace(start, fin, num)[p]
+	//
+	// To use in a function: 
+	//		wave tempwave = linspace(start, fin, num)  //Can be done ONCE (each linspace overwrites itself!)
+	//	or 
+	//		make/n=num tempwave = linspace(start, fin, num)[p]  //Can be done MANY times
+	//
+	// To combine linspaces:
+	//		make/free/o/n=num1 w1 = linspace(start1, fin1, num1)[p]
+	//		make/free/o/n=num2 w2 = linspace(start2, fin2, num2)[p]
+	//		concatenate/np/o {w1, w2}, tempwave
+	//
+	variable start, fin, num
+	Make/N=2/O/Free linspace_start_end = {start, fin}
+	Interpolate2/T=1/N=(num)/Y=linspaced linspace_start_end
+	return linspaced
 end

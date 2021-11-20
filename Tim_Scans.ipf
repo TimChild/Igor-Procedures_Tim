@@ -1,5 +1,6 @@
-
-/////////////// Checking Noise /////////////////
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+//////////////////////////////////////////////////////////// Noise Measurements /////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 function standardNoiseMeasurement(ca_amp_setting, [instrID, channel, comments, nosave])
 	// Run standard noise measurement (i.e. 5x 12s scans with fastdac reading 12kHz)
 	// ca_amp_setting = amplification on current amp (i.e. for 1e8 enter 8)
@@ -55,7 +56,11 @@ function NoiseOnOffTranisiton()
 end
 
 
-/////////////// Dot Tuning Stuff ///////////////
+
+
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+//////////////////////////////////////////////////////////// Dot Tuning Stuff /////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 function checkPinchOffs(instrID, channels, gate_names, ohmic_names, max_bias, [reset_zero, nosave])
 	// Helpful for checking pinch offs
 	// reset_zero: Whether to return gates to 0 bias at end of pinch off (defaults to True)
@@ -80,7 +85,8 @@ function PinchTestBD(bd, start, fin, channels, numpts, delay, ramprate, current_
 	rampmultiplebd(bd, channels, 0, ramprate=ramprate)
 	string comment
 	sprintf comment, "pinch, gates=(%s)", gates_str
-	ScanBabyDACUntil(bd, start, fin, channels, numpts, delay, ramprate, current_wave, cutoff_nA, operator="<", comments=comment)
+	abort "needs reimplmenting"
+//	ScanBabyDACUntil(bd, start, fin, channels, numpts, delay, ramprate, current_wave, cutoff_nA, operator="<", comments=comment)
 	rampmultiplebd(bd, channels, 0, ramprate=ramprate)
 end
 
@@ -123,79 +129,6 @@ end
 //////////////////////////////////////////////////////// Generally Useful Scan Functions ////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
-function DCBias()
-	nvar fd, bd
-
-
-	variable repeats, width, sweeprate, ramprate
-	repeats = 300
-	width = 2500
-	sweeprate = 10000
-	ramprate = 300000
-
-
-//	make/o/free Var1 = {10, 20, 30, 35, 50, 100} // Heater settings
-	make/o/free Var1 = {700, 800, 900, 1000} // Heater settings
-//	make/o/free Var1 = {0, 25} // Heater settings
-//	make/free/o/n=10 w1 = linspace(0, 9, 10)[p]
-//	make/free/o/n=8 w2 = linspace(10, 45, 8)[p]
-//	make/free/o/n=6 w3 = linspace(50, 90, 5)[p]
-//	make/free/o/n=10 w4 = linspace(100, 1000, 10)[p]
-//	concatenate/np/o {w1, w2, w3, w4}, Var1
-//	print Var1
-//	make/o/free Var2 = {0, -100, -200, -400,-400,-600,-700,-800} // BD2D settings
-	make/o/free Var2 = {0}
-	make/o/free Var3 = {0}
-
-
-	variable numi = numpnts(Var1), numj = numpnts(Var2), numk = numpnts(Var3)
-	variable ifin = numi, jfin = numj, kfin = numk
-	variable istart, jstart, kstart
-
-
-	/////// Change range of outer scan variables (useful when retaking a few measurements) ////////
-	/// Starts
-	istart=0; jstart=0; kstart=0
-
-	/// Fins
-	ifin=ifin; jfin=jfin; kfin=kfin
-	////////////////////////////////////////////////////////////////////////////////////////////////
-
-
-	string comments
-	variable i, j, k
-	i = istart; j=jstart; k=kstart
-	for(k=kstart;k<kfin;k++)  // Loop for change k var 3
-		kstart = 0
-		for(j=jstart;j<jfin;j++)	// Loop for change j var2
-			jstart = 0
-
-			// RAMP BD2D
-//			rampmultiplebd(bd, "BD2D", Var2[j])
-
-			for(i=istart;i<ifin;i++) // Loop for changing i var1 and running scan
-				istart = 0  // Reset for next loop if started somewhere in middle
-
-				// RAMP HOs
-
-				rampmultiplefdac(fd, "HO1/10M", Var1[i])
-				rampmultiplefdac(fd, "HO2*1000", -1.531*Var1[i])
-
-				printf "Starting scan at i=%d, j=%d, k=%d, Heater Current (nA) = %.1fmV, BD2D = %.1fmV, Var3 = %.1fmV\r", i, j, k, Var1[i], Var2[j], Var3[k]
-				sprintf comments, ""
-
-				ScanTransition(sweeprate=sweeprate, width=width, ramprate=ramprate, repeats=repeats, center_first=0, additional_comments=", dcbias, scan:"+num2str(i))
-
-				rampmultiplefdac(fd, "HO1/10M", -Var1[i])
-				rampmultiplefdac(fd, "HO2*1000", 1.531*Var1[i])
-
-				ScanTransition(sweeprate=sweeprate, width=width, ramprate=ramprate, repeats=repeats, center_first=0, additional_comments=", dcbias, scan:"+num2str(i))
-
-			endfor
-		endfor
-	endfor
-	print "Finished all scans"
-end
 
 
 function StepTempScanSomething()
@@ -332,9 +265,9 @@ end
 
 
 
-function ScanTransition([sweeprate, width, ramprate, repeats, center_first, center_gate, center_width, sweep_gate, additional_comments, mid, cs_target, virtual_gate, virtual_mids])
-	variable sweeprate, width, ramprate, repeats, center_first, center_width, mid, cs_target, virtual_gate
-	string center_gate, sweep_gate, additional_comments, virtual_mids
+function ScanTransition([sweeprate, width, ramprate, repeats, center_first, center_gate, center_width, sweep_gate, additional_comments, mid, sweepgate_mid, cs_target, virtual_gate, virtual_mids, csqpc_gate])
+	variable sweeprate, width, ramprate, repeats, center_first, center_width, mid, sweepgate_mid, cs_target, virtual_gate
+	string center_gate, sweep_gate, additional_comments, virtual_mids, csqpc_gate
 	nvar fd
 
 	string virtual_gates = "IP1*200"
@@ -346,17 +279,18 @@ function ScanTransition([sweeprate, width, ramprate, repeats, center_first, cent
 	repeats = paramIsDefault(repeats) ? 10 : repeats
 	sweepgate_mid = paramIsDefault(sweepgate_mid) ? 0 : sweepgate_mid
 	// let center_first default to 0
-	sweep_gate = selectstring(paramisdefault(sweep_gate), sweep_gate, "ACC*1000")
-	center_gate = selectstring(paramisdefault(center_gate), center_gate, "ESP")
-	center_width = paramisDefault(center_width) ? 50 : center_width
+	sweep_gate = selectstring(paramisdefault(sweep_gate), sweep_gate, "ACC*400")
+	center_gate = selectstring(paramisdefault(center_gate), center_gate, "ACC*2")
+	center_width = paramisDefault(center_width) ? 20 : center_width
 	additional_comments = selectstring(paramisdefault(additional_comments), additional_comments, "")
 	csqpc_gate = selectstring(paramisdefault(csqpc_gate), csqpc_gate, "CSQ")
 
 	if (center_first)
+		variable center_gate_mid
 		rampmultiplefdac(fd, sweep_gate, mid, ramprate=ramprate)
-		////////////////////////// Need to record mid if centering with sweep gate ///////////////////////////////////
-		centerontransition(gate=center_gate, width=center_width, single_only=1)
-		print "Centered at ESP="+num2str(mid)+"mV"
+		center_gate_mid = centerontransition(gate=center_gate, width=center_width, single_only=1)
+		mid = (cmpstr(center_gate, sweep_gate) == 0) ? center_gate_mid : mid  // If centering with sweepgate, update the mid value
+		printf "Centered at %s=%.2f mV\r" center_gate, mid
 		rampmultiplefdac(fd, sweep_gate, -width*0.5, ramprate=ramprate)
 		if (!paramisdefault(cs_target))
 			CorrectChargeSensor(fd=fd, fdchannelstr="CSQ", fadcID=fd, fadcchannel=0, check=0, direction=1, natarget=cs_target)
@@ -368,38 +302,13 @@ function ScanTransition([sweeprate, width, ramprate, repeats, center_first, cent
 	string virtual_starts_ends
 	if (virtual_gate)
 		virtual_starts_ends = get_virtual_scan_params(mid, width, virtual_mids, ratios)
-		ScanFastDACrepeat(fd, 0, 0, addlistItem(virtual_gates, "ACC*1000", ",", INF), repeats, starts=stringfromlist(0, virtual_starts_ends), fins=stringfromlist(1, virtual_starts_ends), sweeprate=sweeprate, ramprate=ramprate, delay=0.01, comments="transition, repeat" + additional_comments, nosave=0)
+		ScanFastDACrepeat(fd, 0, 0, addlistItem(virtual_gates, sweep_gate, ",", INF), repeats, starts=stringfromlist(0, virtual_starts_ends), fins=stringfromlist(1, virtual_starts_ends), sweeprate=sweeprate, ramprate=ramprate, delay=0.01, comments="transition, repeat" + additional_comments, nosave=0)
 	else
 		ScanFastDACrepeat(fd, mid-width, mid+width, sweep_gate, repeats, sweeprate=sweeprate, ramprate=ramprate, delay=0.01, comments="transition, repeat" + additional_comments, nosave=0)
 	endif
-//	ScanFastDACrepeat(fd, mid-width, mid+width, sweep_gate, repeats, sweeprate=sweeprate, ramprate=ramprate, nosave=0, delay=0.01, comments="transition, repeat" + additional_comments)
 	rampmultiplefdac(fd, sweep_gate, mid, ramprate=ramprate)
 end
 
-
-function ScanTransitionNoise()
-	nvar fd
-
-	variable mid
-	variable natarget = 738*5/3
-	CorrectChargeSensor(fd=fd, fdchannelstr="CSQ", fadcID=fd, fadcchannel=0, check=0, natarget=natarget, direction=1)
-	rampmultiplefdac(fd, "ACC*1000", 0, ramprate=100000)
-	mid = centerontransition(gate="ESP", width=50, single_only=0)
-	print "Centered at ESP="+num2str(mid)+"mV"
-	rampmultiplefdac(fd, "ACC*1000", -2000, ramprate=100000)
-	CorrectChargeSensor(fd=fd, fdchannelstr="CSQ", fadcID=fd, fadcchannel=0, check=0, natarget=natarget, direction=1)
-
-	mid = centerontransition(gate="ACC*1000", width=10000, single_only=0)
-	print "Centered BEFORE at ACC*1000="+num2str(mid)+"mV"
-	ScanFastDAC(fd, -1199, -1201, "BDL_BD2S", numpts=761400, nosave=0, comments="readvstime, ON transition")
-	mid = centerontransition(gate="ACC*1000", width=10000, single_only=0)
-	print "Centered AFTER at ACC*1000="+num2str(mid)+"mV"
-
-	rampmultiplefdac(fd, "ACC*1000", -3500, ramprate=100000)
-	ScanFastDAC(fd, -1199, -1201, "BDL_BD2S", numpts=761400, nosave=0, comments="readvstime, OFF transition")
-
-	rampmultiplefdac(fd, "ACC*1000", 0, ramprate=100000)
-end
 
 
 function ScanTransitionMany()
@@ -447,15 +356,10 @@ function ScanTransitionMany()
 end
 
 
-function ScanAlongTransition()
-
-
-end
-
-
 ///////////////////////////////////////////////////////////////////////////////////////////
 /////////////////////// MISCELLANEOUS /////////////////////////////////////////////////
 //////////////////////////////////////////////////////////////////////////////////
+
 function DCbiasRepeats(max_current, num_steps, duration, [voltage_ratio])
 	// DCBias measurements with ScanFastDACRepeat at each value (rather than a continuously changing 2D plot)
 	// Note: Assumes already lined up on transition

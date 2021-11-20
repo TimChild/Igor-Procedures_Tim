@@ -289,14 +289,14 @@ function ScanTransitionMany()
 	make/o/free Var1  = {-440, 	-410,	-400,	-385,	-356,	-331,	-307,	-281,	-257,	-231,	-205}  // ACC*2
 	make/o/free Var1b = {-25, 	-100,	-150,	-200,	-300,	-400,	-500,	-600,	-700,	-800,	-900}  // SDP
 	make/o/free Var2 = {0}
-	make/o/free Var3 = {0,0,0,0,0,0,0,0,0,0}
+	make/o/free Var3 = {0}
 	
 	variable numi = numpnts(Var1), numj = numpnts(Var2), numk = numpnts(Var3)
 	variable ifin = numi, jfin = numj, kfin = numk
 	variable istart, jstart, kstart
 	
 	// Starts
-	istart=1; jstart=0; kstart=0
+	istart=0; jstart=0; kstart=0
 	
 	// Fins
 	ifin=ifin; jfin=jfin; kfin=kfin

@@ -3,9 +3,9 @@
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 
-/////////////////////////////////////////////////////////////////////////
-////////////////////////////// FD/AWG ///////////////////////////////////
-/////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////
+////////////////////////////// Setting up AWG ///////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////
 
 function SetupEntropySquareWaves([freq, cycles, hqpc_plus, hqpc_minus, channel_ratio, balance_multiplier, hqpc_bias_multiplier, ramplen])
 	variable freq, cycles, hqpc_plus, hqpc_minus, channel_ratio, balance_multiplier, hqpc_bias_multiplier, ramplen
@@ -32,8 +32,6 @@ function SetupEntropySquareWaves([freq, cycles, hqpc_plus, hqpc_minus, channel_r
 	fdAWG_make_multi_square_wave(fd, 0, cplus, cminus, spt, spt, spt, 1, ramplen=ramplen)
 
 	// Setup AWG
-//	fdAWG_setup_AWG(fd, AWs="0,1", DACs="R2T/0.001,TC/0.001", numCycles=cycles)
-//	fdAWG_setup_AWG(fd, AWs="0,1", DACs="HO1/10M,HO2/1000", numCycles=cycles)
 	fdAWG_setup_AWG(fd, AWs="0,1", DACs="OHC(10M),OHV*1000", numCycles=cycles)
 end
 
@@ -81,7 +79,7 @@ function Set_multi_square_wave(instrID, v0, vP, vM, v0len, vPlen, vMlen, wave_nu
    make/o/free lens = {v0len, vPlen, vMlen}
 
    // Sanity check on period
-   // Note: limit checks happen in AWG_RAMP  // TODO: put that check in
+   // Note: limit checks happen in AWG_RAMP
    if (sum(lens) > 1)
       string msg
       sprintf msg "Do you really want to make a square wave with period %.3gs?", sum(lens)
@@ -92,7 +90,7 @@ function Set_multi_square_wave(instrID, v0, vP, vM, v0len, vPlen, vMlen, wave_nu
    endif
 
    // make wave to store setpoints/sample_lengths
-   make/o/free/n=(-1, 2) awg_sqw  // TODO: check dims of wave
+   make/o/free/n=(-1, 2) awg_sqw 
 
    variable samplingFreq = getFADCspeed(instrID)  // Gets sampling rate of FD (Note: NOT measureFreq here)
    variable numSamples = 0
@@ -120,25 +118,21 @@ end
 
 
 
-
-
-
-
 ////////////////////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////// Charge sensor functions ///////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////////////////////
 
 function GetTargetCSCurrent([oldcscurr, lower_lim, upper_lim, nosave])
-// A rough outline for a new correctchargesensor function. Currently relies on defaults in CorrectChargeSensor
-// To be implemented into CorrectChargeSensor after some testing
+	// A rough outline for a new correctchargesensor function. Currently relies on defaults in CorrectChargeSensor
+	// To be implemented into CorrectChargeSensor after some testing
 	variable oldcscurr, lower_lim, upper_lim, nosave
 	nvar fd
 	string channelstr = "CSQ"
 
 	channelstr = SF_get_channels(channelstr, fastdac=1)
 
-	lower_lim = paramisdefault(lower_lim) ? 4 : lower_lim
-	upper_lim = paramisdefault(upper_lim) ? 9 : upper_lim
+	lower_lim = paramisdefault(lower_lim) ? 1 : lower_lim
+	upper_lim = paramisdefault(upper_lim) ? 3 : upper_lim
 	nosave = paramisdefault(nosave) ? 1 : nosave
 
 	// Begin by calling CorrectChargeSensor with default things
@@ -198,7 +192,7 @@ function CorrectChargeSensor([bd, bdchannelstr, dmmid, fd, fdchannelstr, fadcID,
 	wave/T dacvalstr
 	wave/T fdacvalstr
 
-	natarget = paramisdefault(natarget) ? 1630 : natarget
+	natarget = paramisdefault(natarget) ? 1.630 : natarget
 	direction = paramisdefault(direction) ? 1 : direction
 	zero_tol = paramisdefault(zero_tol) ? 0.5 : zero_tol  // How close to zero before it starts to get more averaged measurements
 
@@ -280,13 +274,13 @@ function CorrectChargeSensor([bd, bdchannelstr, dmmid, fd, fdchannelstr, fadcID,
 						rampoutputfdac(fd, fdchannel, nextdac)
 					endif
 				else
-					abort "Computer tried to do bad thing"
+					abort "Aborted"
 				endif
 			endif
 
 			//get current after dac step
 			if (!paramisdefault(dmmid))
-				abort "Not implemented DMM again"
+				abort "Not implemented DMM again yet"
 //				current = read34401A(dmmid)
 			else
 				current = getFADCvalue(fadcID, fadcchannel, len_avg=avg_len)
@@ -313,6 +307,8 @@ function CorrectChargeSensor([bd, bdchannelstr, dmmid, fd, fdchannelstr, fadcID,
 		endif
 	endif
 end
+
+
 
 ////////////////////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////// Centering Functions ////////////////////////////////////
@@ -387,6 +383,8 @@ function CenterOnTransition([gate, virtual_gates, width, single_only])
 end
 
 
+
+
 //////////////////////////////////////////////////////////////////////////////////////////
 ////////////////////////// Miscellaneous ////////////////////////////////////////////////
 //////////////////////////////////////////////////////////////////////////////////////////
@@ -418,7 +416,6 @@ function saveLogsOnly([msg])
 //	initSaveFiles(msg=msg, logs_only=1) // Saves logs here, and adds Logs_Only attr to root group of HDF
 	initcloseSaveFiles(num2str(hdfid))
 end
-
 
 
 function WaitTillTempStable(instrID, targetTmK, times, delay, err)
@@ -462,44 +459,9 @@ end
 
 
 
-function udh5()
-	// Very old function for loading HDF files back into Igor. Need a new version of this
-	abort "Too old to trust, need to be updated or at least checked carefully"
-	string infile = wavelist("*",";","") // get wave list
-	string hdflist = indexedfile(data,-1,".h5") // get list of .h5 files
-
-	string currentHDF="", currentWav="", datasets="", currentDS
-	variable numHDF = itemsinlist(hdflist), fileid=0, numWN = 0, wnExists=0
-
-	variable i=0, j=0, numloaded=0
-
-	for(i=0; i<numHDF; i+=1) // loop over h5 filelist
-
-	   currentHDF = StringFromList(i,hdflist)
-
-		HDF5OpenFile/P=data /R fileID as currentHDF
-		HDF5ListGroup /TYPE=2 /R=1 fileID, "/" // list datasets in root group
-		datasets = S_HDF5ListGroup
-		numWN = itemsinlist(datasets)
-		currentHDF = currentHDF[0,(strlen(currentHDF)-4)]
-		for(j=0; j<numWN; j+=1) // loop over datasets within h5 file
-			currentDS = StringFromList(j,datasets)
-			currentWav = currentHDF+currentDS
-		   wnExists = FindListItem(currentWav, infile,  ";")
-		   if (wnExists==-1)
-		   	// load wave from hdf
-		   	HDF5LoadData /Q /IGOR=-1 /N=$currentWav fileID, currentDS
-		   	numloaded+=1
-		   endif
-		endfor
-		HDF5CloseFile fileID
-	endfor
-
-   print numloaded, "waves uploaded"
-end
-
-
 function/wave Linspace(start, fin, num)
+	// An Igor substitute for np.linspace() (obviously with many caveats and drawbacks since it is in Igor...)
+	//
 	// To use this in command line:
 	//		make/o/n=num tempwave
 	// 		tempwave = linspace(start, fin, num)[p]

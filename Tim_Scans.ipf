@@ -129,6 +129,155 @@ end
 //////////////////////////////////////////////////////// Generally Useful Scan Functions ////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
+function ScanAlongTransition(step_gate, step_size, step_range, center_gate, sweep_gate, sweeprate, repeats, width, [center_step_ratio, centering_width, center_sweep_gate, scan_type, correct_cs_gate, sweep_gate_start, load_datnum, hqpc_bias, ramprate, num, correction_gate, corr_step_ratio, step_gate_isbd, mid, virtual_gate, natarget])
+	// Scan at many positions along a transition, centering on transition for each scan along the way.
+	// Rather than doing a true scan along transition, this just takes a series of short repeat measurements in small steps. Will make LOTS of dats, but keeps things a lot simpler
+	//
+	// step_gate: Gate to step along transition with. These always do fixed steps, center_gate is used to center back on transition
+	// step_size: mV to step between each repeat scan
+	// step_range: How far to keep stepping in step_gate (i.e. 50 would mean 10 steps for 5mV step size)
+	// center_gate: Gate to use for centering on transition
+	// sweep_gate: Gate to sweep for scan (i.e. plunger or accumulation)
+	// center_step_ratio: Roughly the amount center_gate needs to step to counteract step_gates (will default to 0)
+	// centering_width: How wide to scan for CenterOnTransition
+	// center_sweep_gate: Whether to also center the sweep gate, or just sweep around 0
+	// width: Width of scan around center of transition in sweep_gate (actually sweeps + and - width)
+	// correct_cs_gate: Gate to use for correcting the Charge Sensor
+	// sweep_gate_start: Start point for sweepgate, useful when loading from hdf
+	// correction_gate: Secondary stepping gate for something like a constant gamma scan
+	// corr_step_ratio: Proportion of step gate potential to apply to the correction gate each step
+	// step_gate_isbd: If step gate is on bd, set = 1
+	// natarget: Target nA for current amp
+	variable step_size, step_range, center_step_ratio, sweeprate, repeats, center_sweep_gate, width, sweep_gate_start, load_datnum, centering_width, hqpc_bias, ramprate, num, corr_step_ratio, step_gate_isbd, mid, virtual_gate, natarget
+	string step_gate, center_gate, sweep_gate, correct_cs_gate, scan_type, correction_gate
+
+	center_step_ratio = paramisdefault(center_step_ratio) ? 0 : center_step_ratio
+	corr_step_ratio = paramisdefault(corr_step_ratio) ? 0 : corr_step_ratio
+	hqpc_bias = paramisdefault(hqpc_bias) ? 0 : hqpc_bias
+	centering_width = paramIsDefault(centering_width) ? 20 : centering_width
+	scan_type = selectstring(paramIsDefault(scan_type), scan_type, "transition")
+	correct_cs_gate = selectstring(paramIsDefault(correct_cs_gate), correct_cs_gate, "CSQ")
+	ramprate = paramisDefault(ramprate) ? 10*sweeprate : ramprate
+	num =  paramisDefault(num) ? 1 : num
+	step_gate_isbd =  paramisDefault(step_gate_isbd) ? 0 : step_gate_isbd
+	variable step_gate_isfd = !step_gate_isbd
+	mid =  paramisDefault(mid) ? 0 : mid
+	natarget = paramisdefault(natarget) ? 1.6 : natarget 
+
+	nvar fd, bd
+
+	if (!paramIsDefault(load_datnum))
+		loadFromHDF(load_datnum, no_check=1)
+		if (!paramisdefault(sweep_gate_start))
+			rampmultiplefdac(fd, sweep_gate, sweep_gate_start)
+		endif
+	endif
+
+	wave/T fdacvalstr
+	wave/T dacvalstr
+
+	variable sg_val, cg_val, corrg_val, csq_val
+	variable total_scan_range = 0  // To keep track of how far has been scanned
+	variable i = 0
+	variable center_limit = 100  // Above this value in step gate, don't try to center (i.e. gamma broadened)
+
+	do
+		// Get DAC val of step_gate
+		if (step_gate_isfd)
+			sg_val = str2num(fdacvalstr[str2num(SF_get_channels(step_gate, fastdac=1))][1])
+		else
+			sg_val = str2num(dacvalstr[str2num(SF_get_channels(step_gate, fastdac=0))][1])
+		endif
+		
+		// Get DAC val of centering_gate
+		if (cmpstr(center_gate, sweep_gate) == 0)
+			cg_val = mid
+		else
+			cg_val = str2num(fdacvalstr[str2num(SF_get_channels(center_gate, fastdac=1))][1]) //get DAC val of centering_gate
+		endif
+		
+		// Get DAC val of correction_gate
+		if (!paramIsDefault(correction_gate))
+			corrg_val = str2num(fdacvalstr[str2num(SF_get_channels(correction_gate, fastdac=1))][1]) //get DAC val of correction_gate
+		endif
+
+		// Reset sweepgate
+		RampMultiplefdac(fd, sweep_gate, mid)
+
+		// Ramp step_gate (and correction_gate) to next value
+		if (i != 0)
+			if (step_gate_isfd)
+				RampMultiplefdac(fd, step_gate, sg_val+step_size)
+			else
+				RampMultiplebd(bd, step_gate, sg_val+step_size)
+			endif
+			RampMultiplefdac(fd, center_gate, cg_val+step_size*center_step_ratio)
+			total_scan_range += step_size
+			if (!paramIsDefault(correction_gate))
+				RampMultiplefdac(fd, correction_gate, corrg_val+step_size*corr_step_ratio)
+			endif
+			sg_val = sg_val+step_size
+		endif
+		
+		// Center and correct charge sensor
+		RampMultiplefdac(fd, sweep_gate, mid-50)
+		CorrectChargeSensor(fd=fd, fdchannelstr=correct_cs_gate, fadcID=fd, fadcchannel=0, check=0, direction=1, natarget=natarget)
+		RampMultiplefdac(fd, sweep_gate, mid)
+		if(sg_val < center_limit)
+			cg_val = CenterOnTransition(gate=center_gate, width=centering_width, single_only=1)
+			RampMultiplefdac(fd, sweep_gate, mid-200)
+			CorrectChargeSensor(fd=fd, fdchannelstr=correct_cs_gate, fadcID=fd, fadcchannel=0, check=0, direction=1, natarget=natarget)
+			RampMultiplefdac(fd, sweep_gate, mid)
+			cg_val = CenterOnTransition(gate=center_gate, width=centering_width, single_only=1)
+		endif
+		if (cmpstr(center_gate, sweep_gate) == 0)  // If center gate is also sweep gate, then need to get new mid cg_val
+			mid = cg_val
+		endif
+		if (center_sweep_gate)
+			mid = CenterOnTransition(gate=sweep_gate, width=width, single_only=1)
+		else
+			mid = mid
+		endif
+
+		RampMultiplefdac(fd, sweep_gate, mid-200)
+		CorrectChargeSensor(fd=fd, fdchannelstr=correct_cs_gate, fadcID=fd, fadcchannel=0, check=0, direction=1, natarget=natarget)
+
+
+		string virtual_mids
+		strswitch (scan_type)
+			case "center_test":
+				ScanFastDAC(fd, -5000, 5000, "ACC*1000", sweeprate=10000, nosave=1)
+				rampmultiplefdac(fd, "ACC*1000", 0)
+				break
+			case "transition":
+				virtual_mids = num2str(sg_val)
+				ScanTransition(sweeprate=sweeprate, width=width, ramprate=ramprate, repeats=repeats, center_first=center_sweep_gate, mid=mid, virtual_gate=virtual_gate, virtual_mids=virtual_mids)
+				break
+			case "entropy":
+				virtual_mids = num2str(sg_val)
+				ScanEntropyRepeat(center_first=0, balance_multiplier=1, width=width, hqpc_bias=hqpc_bias, additional_comments=", scan along transition, scan:"+num2str(i), sweeprate=sweeprate, two_part=0, repeats=repeats, num=num, center=mid, virtual_gate=virtual_gate, virtual_mids=virtual_mids)
+				rampmultiplefdac(fd, step_gate, sg_val)
+				break
+			case "entropy+transition":
+				ScanEntropyRepeat(center_first=0, balance_multiplier=1, width=width, hqpc_bias=hqpc_bias, additional_comments=", scan along transition, scan:"+num2str(i), sweeprate=sweeprate, two_part=0, repeats=repeats, num=num, center=mid)
+				ScanTransition(sweeprate=sweeprate*50, width=width*1.5, ramprate=30000, repeats=repeats*5, center_first=0, additional_comments=", scan along transition, scan:"+num2str(i), mid=mid)
+				break
+			case "csq only":
+				RampMultiplefdac(fd, "ACC*1000", -10000)
+				csq_val = str2num(fdacvalstr[str2num(SF_get_channels("CSQ", fastdac=1))][1])
+				ScanFastDAC(fd, csq_val-50, csq_val+50, "CSQ", sweeprate=100, nosave=0, comments="charge sensor trace")
+				RampMultiplefdac(fd, "ACC*1000", 0)
+				RampMultiplefdac(fd, "CSQ", csq_val)
+				break
+			default:
+				abort scan_type + " not recognized"
+		endswitch
+		i++
+
+	while (total_scan_range + step_size <= step_range)
+
+end
+
 
 
 function StepTempScanSomething()
@@ -258,7 +407,7 @@ function ScanEntropyRepeat([num, center_first, balance_multiplier, width, hqpc_b
 				ScanFastDACrepeat(fd, mid-width1, mid+width1, sweepgate, r, sweeprate=sweeprate, delay=0.1, comments=comments, use_awg=1, nosave=nosave)
 			endif
 		endif
-		rampmultiplefdac(fd, "ACC*1000", mid)
+		rampmultiplefdac(fd, sweep_gate, mid)
 		i++
 	while (i<num)
 end
@@ -414,202 +563,3 @@ function DCbiasRepeats(max_current, num_steps, duration, [voltage_ratio])
 end
 
 
-
-function ScanAlongTransition(step_gate, step_size, step_range, center_gate, sweep_gate, sweeprate, repeats, width, [center_step_ratio, centering_width, center_sweep_gate, scan_type, correct_cs_gate, sweep_gate_start, load_datnum, hqpc_bias, ramprate, num, correction_gate, corr_step_ratio, step_gate_isbd, mid, virtual_gate, natarget])
-	// Scan at many positions along a transition, centering on transition for each scan along the way.
-	// Rather than doing a true scan along transition, this just takes a series of short repeat measurements in small steps. Will make LOTS of dats, but keeps things a lot simpler
-	// step_gate: Gate to step along transition with. These always do fixed steps, center_gate is used to center back on transition
-	// step_size: mV to step between each repeat scan
-	// step_range: How far to keep stepping in step_gate (i.e. 50 would mean 10 steps for 5mV step size)
-	// center_gate: Gate to use for centering on transition
-	// sweep_gate: Gate to sweep for scan (i.e. plunger or accumulation)
-	// center_step_ratio: Roughly the amount center_gate needs to step to counteract step_gates (will default to 0)
-	// centering_width: How wide to scan for CenterOnTransition
-	// center_sweep_gate: Whether to also center the sweep gate, or just sweep around 0
-	// width: Width of scan around center of transition in sweep_gate (actually sweeps + and - width)
-	// correct_cs_gate: Gate to use for correcting the Charge Sensor
-	// sweep_gate_start: Start point for sweepgate, useful when loading from hdf
-	// correction_gate: Secondary stepping gate for something like a constant gamma scan
-	// corr_step_ratio: Proportion of step gate potential to apply to the correction gate each step
-	// step_gate_isbd: If step gate is on bd, set = 1
-	// natarget: Target mV for current amp
-	variable step_size, step_range, center_step_ratio, sweeprate, repeats, center_sweep_gate, width, sweep_gate_start, load_datnum, centering_width, hqpc_bias, ramprate, num, corr_step_ratio, step_gate_isbd, mid, virtual_gate, natarget
-	string step_gate, center_gate, sweep_gate, correct_cs_gate, scan_type, correction_gate
-
-	center_step_ratio = paramisdefault(center_step_ratio) ? 0 : center_step_ratio
-	corr_step_ratio = paramisdefault(corr_step_ratio) ? 0 : corr_step_ratio
-	hqpc_bias = paramisdefault(hqpc_bias) ? 0 : hqpc_bias
-	centering_width = paramIsDefault(centering_width) ? 50 : centering_width
-	scan_type = selectstring(paramIsDefault(scan_type), scan_type, "transition")
-	correct_cs_gate = selectstring(paramIsDefault(correct_cs_gate), correct_cs_gate, "CSQ")
-	ramprate = paramisDefault(ramprate) ? 5*sweeprate : ramprate
-	num =  paramisDefault(num) ? 1 : num
-	step_gate_isbd =  paramisDefault(step_gate_isbd) ? 0 : step_gate_isbd
-	variable step_gate_isfd = !step_gate_isbd
-	mid =  paramisDefault(mid) ? 0 : mid
-	natarget = paramisdefault(natarget) ? 6.3 : natarget //7
-
-	nvar fd, bd
-
-	if (!paramIsDefault(load_datnum))
-		loadFromHDF(load_datnum, no_check=1)
-		if (!paramisdefault(sweep_gate_start))
-			rampmultiplefdac(fd, sweep_gate, sweep_gate_start)
-		endif
-	endif
-
-
-	wave/T fdacvalstr
-	wave/T dacvalstr
-
-	variable sg_val, cg_val, corrg_val, csq_val
-	variable total_scan_range = 0  // To keep track of how far has been scanned
-	variable i = 0
-	variable center_limit = 100  // Above this value in step gate, don't try to center (i.e. gamma broadened)
-
-	do
-		if (step_gate_isfd)
-			sg_val = str2num(fdacvalstr[str2num(SF_get_channels(step_gate, fastdac=1))][1]) //get DAC val of step_gates
-		else
-			sg_val = str2num(dacvalstr[str2num(SF_get_channels(step_gate, fastdac=0))][1]) //get DAC val of step_gates
-		endif
-		if (cmpstr(center_gate, sweep_gate) == 0)
-			cg_val = mid
-		else
-			cg_val = str2num(fdacvalstr[str2num(SF_get_channels(center_gate, fastdac=1))][1]) //get DAC val of centering_gate
-		endif
-		if (!paramIsDefault(correction_gate))
-			corrg_val = str2num(fdacvalstr[str2num(SF_get_channels(correction_gate, fastdac=1))][1]) //get DAC val of correction_gate
-		endif
-
-		RampMultiplefdac(fd, sweep_gate, mid)
-
-		if (i != 0)
-			if (step_gate_isfd)
-				RampMultiplefdac(fd, step_gate, sg_val+step_size)
-			else
-				RampMultiplebd(bd, step_gate, sg_val+step_size)
-			endif
-			RampMultiplefdac(fd, center_gate, cg_val+step_size*center_step_ratio)
-			total_scan_range += step_size
-			if (!paramIsDefault(correction_gate))
-				RampMultiplefdac(fd, correction_gate, corrg_val+step_size*corr_step_ratio)
-			endif
-			sg_val = sg_val+step_size
-		endif
-
-		RampMultiplefdac(fd, sweep_gate, mid-50)
-		CorrectChargeSensor(fd=fd, fdchannelstr=correct_cs_gate, fadcID=fd, fadcchannel=0, check=0, direction=1, natarget=natarget)
-		RampMultiplefdac(fd, sweep_gate, mid)
-////////////////////////////////////////////////////////////// THIS SHOULD USUALLY BE ON ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-		if(sg_val < center_limit)
-			cg_val = CenterOnTransition(gate=center_gate, width=centering_width, single_only=1)
-			RampMultiplefdac(fd, sweep_gate, mid-200)
-			CorrectChargeSensor(fd=fd, fdchannelstr=correct_cs_gate, fadcID=fd, fadcchannel=0, check=0, direction=1, natarget=natarget)
-			RampMultiplefdac(fd, sweep_gate, mid)
-			cg_val = CenterOnTransition(gate=center_gate, width=centering_width, single_only=1)
-		endif
-//////////////////////////////////////////////////////////// THIS SHOULD USUALLY BE ON ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-		if (cmpstr(center_gate, sweep_gate) == 0)  // If center gate is also sweep gate, then need to get new mid cg_val
-			mid = cg_val
-		endif
-		if (center_sweep_gate)
-			mid = CenterOnTransition(gate=sweep_gate, width=width, single_only=1)
-		else
-			mid = mid
-		endif
-
-		RampMultiplefdac(fd, sweep_gate, mid-200)
-		CorrectChargeSensor(fd=fd, fdchannelstr=correct_cs_gate, fadcID=fd, fadcchannel=0, check=0, direction=1, natarget=natarget)
-//
-//		// Do CSQ trace to find most sensitive/linear region of CS
-//		natarget = GetTargetCSCurrent()
-//
-//		RampMultiplefdac(fd, sweep_gate, mid)
-
-		//Center again ... GetTargetCSCurrent changes things (sometimes) by a lot
-//		if(sg_val < center_limit)
-////			CenterOnTransition(gate=center_gate, width=centering_width, single_only=1)
-//			RampMultiplefdac(fd, sweep_gate, mid-200)
-//			CorrectChargeSensor(fd=fd, fdchannelstr=correct_cs_gate, fadcID=fd, fadcchannel=0, check=0, direction=1, natarget=natarget)
-//			RampMultiplefdac(fd, sweep_gate, mid)
-//		endif
-		string virtual_mids
-		strswitch (scan_type)
-			case "center_test":
-				ScanFastDAC(fd, -5000, 5000, "ACC*1000", sweeprate=10000, nosave=1)
-				rampmultiplefdac(fd, "ACC*1000", 0)
-				break
-			case "transition":
-				virtual_mids = num2str(sg_val)
-				ScanTransition(sweeprate=sweeprate, width=width, ramprate=ramprate, repeats=repeats, center_first=center_sweep_gate, mid=mid, virtual_gate=virtual_gate, virtual_mids=virtual_mids)
-//				ScanFastDAC(fd, -1000, 1000, "ACC*1000", sweeprate=250, nosave=1)
-//				rampmultiplefdac(fd, "ACC*1000", 0)
-				break
-			case "impurity_transition":
-				ScanTransition(sweep_gate="IP1*200", sweeprate=sweeprate, width=width, ramprate=ramprate, repeats=repeats, center_first=center_sweep_gate, mid=mid)
-//				ScanFastDAC(fd, -500, 500, "IP1*200", sweeprate=1000, nosave=1)
-//				rampmultiplefdac(fd, "IP1*200", 0)
-				break
-			case "entropy":
-				virtual_mids = num2str(sg_val)
-//				ScanEntropyRepeat(center_first=0, balance_multiplier=1, width=width, hqpc_bias=hqpc_bias, additional_comments=", scan along transition, scan:"+num2str(i), sweeprate=sweeprate, two_part=0, repeats=repeats, num=num, center=mid, virtual_gate=virtual_gate, virtual_mids=virtual_mids)
-				ScanEntropyRepeat(center_first=0, balance_multiplier=1, width=width, hqpc_bias=hqpc_bias, additional_comments=", scan along transition, scan:"+num2str(i), sweeprate=sweeprate, two_part=0, repeats=repeats, num=num, center=mid, virtual_gate=virtual_gate, virtual_mids=virtual_mids, freq=12.5, cycles=1)
-				rampmultiplefdac(fd, step_gate, sg_val)
-//				ScanFastDAC(fd, -5000, 5000, "ACC*1000", sweeprate=10000, nosave=1)
-//				rampmultiplefdac(fd, "ACC*1000", 0)
-				break
-			case "entropy+transition":
-				ScanEntropyRepeat(center_first=0, balance_multiplier=1, width=width, hqpc_bias=hqpc_bias, additional_comments=", scan along transition, scan:"+num2str(i), sweeprate=sweeprate, two_part=0, repeats=repeats, num=num, center=mid)
-				ScanTransition(sweeprate=sweeprate*50, width=width*1.5, ramprate=30000, repeats=repeats*5, center_first=0, additional_comments=", scan along transition, scan:"+num2str(i), mid=mid)
-//				ScanFastDAC(fd, mid-5000, mid+5000, "ACC*1000", sweeprate=50000, ramprate=100000, nosave=1)
-//				rampmultiplefdac(fd, "ACC*1000", mid)
-				break
-			case "csq only":
-				RampMultiplefdac(fd, "ACC*1000", -10000)
-				csq_val = str2num(fdacvalstr[str2num(SF_get_channels("CSQ", fastdac=1))][1])
-				ScanFastDAC(fd, csq_val-50, csq_val+50, "CSQ", sweeprate=100, nosave=0, comments="charge sensor trace")
-				RampMultiplefdac(fd, "ACC*1000", 0)
-				RampMultiplefdac(fd, "CSQ", csq_val)
-				break
-			case "backaction noise":
-				DotTuneAround(0, 0, 5000, 500, "ACC*1000", "IP1*200", sweeprate=40000, ramprate_x=200000, numptsy=31)
-				break
-			case "lever_arm":
-				ScanFastDAC2D(fd, mid-width, mid+width, sweep_gate, -100, 100, "DO*100", repeats, sweeprate=sweeprate, rampratex=sweeprate*10, comments="lever arm, Reservoir potential vs Sweep gate")
-				rampmultiplefdac(fd, sweep_gate, mid, ramprate=ramprate)
-				rampmultiplefdac(fd, "DO*100", 0)
-				break
-			case "acc_lever_arm":
-				cg_val = str2num(fdacvalstr[str2num(SF_get_channels(center_gate, fastdac=1))][1])
-
-				rampmultiplefdac(fd, "ACC*1000", 0)
-				rampmultiplefdac(fd, sweep_gate, mid, ramprate=ramprate)
-				CenterOnTransition(gate=center_gate, width=centering_width, single_only=1)
-				ScanTransition(sweep_gate=sweep_gate, sweeprate=sweeprate, width=width, ramprate=ramprate, repeats=repeats, center_first=center_sweep_gate, mid=mid)
-
-				rampmultiplefdac(fd, "ACC*1000", -10000)
-				rampmultiplefdac(fd, center_gate, cg_val+120)
-				rampmultiplefdac(fd, sweep_gate, mid, ramprate=ramprate)
-				CenterOnTransition(gate=center_gate, width=centering_width, single_only=1)
-				ScanTransition(sweep_gate=sweep_gate, sweeprate=sweeprate, width=width, ramprate=ramprate, repeats=repeats, center_first=center_sweep_gate, mid=mid)
-
-				rampmultiplefdac(fd, "ACC*1000", 10000)
-				rampmultiplefdac(fd, center_gate, cg_val-120)
-				rampmultiplefdac(fd, sweep_gate, mid, ramprate=ramprate)
-				CenterOnTransition(gate=center_gate, width=centering_width, single_only=1)
-				ScanTransition(sweep_gate=sweep_gate, sweeprate=sweeprate, width=width, ramprate=ramprate, repeats=repeats, center_first=center_sweep_gate, mid=mid)
-
-				rampmultiplefdac(fd, "ACC*1000", 0)
-				rampmultiplefdac(fd, sweep_gate, mid, ramprate=ramprate)
-				rampmultiplefdac(fd, center_gate, cg_val)
-
-				break
-			default:
-				abort scan_type + " not recognized"
-		endswitch
-		i++
-
-	while (total_scan_range + step_size <= step_range)
-
-end

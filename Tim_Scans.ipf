@@ -37,22 +37,30 @@ function NoiseOnOffTranisiton()
 
 	nvar fd
 	variable mid
-	ScanFastDAC(fd, -100, -180, "CSQ", sweeprate=20, comments="QPC trace before On/Off transition", nosave=0)
-	rampMultipleFDAC(fd, "CSQ", -155)
+	ScanFastDAC(fd, -150, -210, "CSQ", sweeprate=20, comments="QPC trace before On/Off transition", nosave=0)
+	
+	CorrectChargeSensor(fd=fd, fdchannelstr="CSQ", fadcID=fd, fadcchannel=0, natarget=2.1,  check=0, direction=1)	
+	
+	CenterOnTransition(gate="ACC*400", width=500, single_only=1)	
+	ScanFastDAC(fd, -600, -600, "ACC*400", sweeprate=100, comments="Charge transition before On/Off transition", nosave=0)
 	variable i
 	for (i=0; i<30; i++)
 		mid = CenterOnTransition(gate="ACC*400", width=500, single_only=1)
 		printf "Center of transition at ACC*400 = %.2f\r", mid
 		asleep(3)
-		FDacSpectrumAnalyzer(fd,"0",30,numAverage=1,comments="noise, spectrum, On Transition", ca_amp=8)
+		FDacSpectrumAnalyzer(fd,"0",30,numAverage=1,comments="noise, spectrum, On Transition", ca_amp=9)
 		rampmultipleFDAC(fd, "ACC*400", mid-500)
+
 		asleep(3)
-		FDacSpectrumAnalyzer(fd,"0",30,numAverage=1,comments="noise, spectrum, Off Transition", ca_amp=8)
+		FDacSpectrumAnalyzer(fd,"0",30,numAverage=1,comments="noise, spectrum, Off Transition", ca_amp=9)
 		rampmultipleFDAC(fd, "ACC*400", mid)
 	endfor
-
+	
+	CenterOnTransition(gate="ACC*400", width=500, single_only=1)	
+	ScanFastDAC(fd, -600, -600, "ACC*400", sweeprate=100, comments="Charge transition after On/Off transition", nosave=0)
+	
 	ScanFastDAC(fd, -100, -180, "CSQ", sweeprate=20, comments="QPC trace after On/Off transition", nosave=0)
-	rampMultipleFDAC(fd, "CSQ", -155)
+	CorrectChargeSensor(fd=fd, fdchannelstr="CSQ", fadcID=fd, fadcchannel=0, natarget=2.1,  check=0, direction=1)	
 end
 
 
@@ -96,7 +104,7 @@ function DotTuneAround(x, y, width_x, width_y, channelx, channely, [sweeprate, r
 	variable sweeprate, numptsy
 	string channelx, channely, csname, additional_comments
 
-	variable natarget = 1630//595//750//287 //1335   // ADC reading in mV to get most sensitive part of CS
+	variable natarget = 2.1   // ADC reading in mV to get most sensitive part of CS
 	sweeprate = paramisdefault(sweeprate) ? 300 : sweeprate
 	numptsy = paramisdefault(numptsy) ? 21 : numptsy
 	csname = selectstring(paramisdefault(csname), csname, "CSQ")
@@ -144,16 +152,19 @@ function ScanAlongTransition(step_gate, step_size, step_range, center_gate, swee
 	// width: Width of scan around center of transition in sweep_gate (actually sweeps + and - width)
 	// correct_cs_gate: Gate to use for correcting the Charge Sensor
 	// sweep_gate_start: Start point for sweepgate, useful when loading from hdf
+	// hqpc_bias: mV to apply to current bias resistor for square entropy heating
+	// num: Number of times to repeat measurement at each step
 	// correction_gate: Secondary stepping gate for something like a constant gamma scan
 	// corr_step_ratio: Proportion of step gate potential to apply to the correction gate each step
 	// step_gate_isbd: If step gate is on bd, set = 1
+	// mid: center value for sweepgate
 	// natarget: Target nA for current amp
 	variable step_size, step_range, center_step_ratio, sweeprate, repeats, center_sweep_gate, width, sweep_gate_start, load_datnum, centering_width, hqpc_bias, ramprate, num, corr_step_ratio, step_gate_isbd, mid, virtual_gate, natarget
 	string step_gate, center_gate, sweep_gate, correct_cs_gate, scan_type, correction_gate
 
 	center_step_ratio = paramisdefault(center_step_ratio) ? 0 : center_step_ratio
 	corr_step_ratio = paramisdefault(corr_step_ratio) ? 0 : corr_step_ratio
-	hqpc_bias = paramisdefault(hqpc_bias) ? 0 : hqpc_bias
+	hqpc_bias = paramisdefault(hqpc_bias) ? 25 : hqpc_bias
 	centering_width = paramIsDefault(centering_width) ? 20 : centering_width
 	scan_type = selectstring(paramIsDefault(scan_type), scan_type, "transition")
 	correct_cs_gate = selectstring(paramIsDefault(correct_cs_gate), correct_cs_gate, "CSQ")
@@ -162,7 +173,9 @@ function ScanAlongTransition(step_gate, step_size, step_range, center_gate, swee
 	step_gate_isbd =  paramisDefault(step_gate_isbd) ? 0 : step_gate_isbd
 	variable step_gate_isfd = !step_gate_isbd
 	mid =  paramisDefault(mid) ? 0 : mid
-	natarget = paramisdefault(natarget) ? 1.6 : natarget 
+	natarget = paramisdefault(natarget) ? 2.1 : natarget 
+	variable center_limit = -120  // Above this value in step gate, don't try to center (i.e. gamma broadened)
+
 
 	nvar fd, bd
 
@@ -179,7 +192,6 @@ function ScanAlongTransition(step_gate, step_size, step_range, center_gate, swee
 	variable sg_val, cg_val, corrg_val, csq_val
 	variable total_scan_range = 0  // To keep track of how far has been scanned
 	variable i = 0
-	variable center_limit = 100  // Above this value in step gate, don't try to center (i.e. gamma broadened)
 
 	do
 		// Get DAC val of step_gate
@@ -246,8 +258,8 @@ function ScanAlongTransition(step_gate, step_size, step_range, center_gate, swee
 		string virtual_mids
 		strswitch (scan_type)
 			case "center_test":
-				ScanFastDAC(fd, -5000, 5000, "ACC*1000", sweeprate=10000, nosave=1)
-				rampmultiplefdac(fd, "ACC*1000", 0)
+				ScanFastDAC(fd, -1000, 1000, "ACC*400", sweeprate=10000, nosave=1)
+				rampmultiplefdac(fd, "ACC*400", 0)
 				break
 			case "transition":
 				virtual_mids = num2str(sg_val)
@@ -256,7 +268,6 @@ function ScanAlongTransition(step_gate, step_size, step_range, center_gate, swee
 			case "entropy":
 				virtual_mids = num2str(sg_val)
 				ScanEntropyRepeat(center_first=0, balance_multiplier=1, width=width, hqpc_bias=hqpc_bias, additional_comments=", scan along transition, scan:"+num2str(i), sweeprate=sweeprate, two_part=0, repeats=repeats, num=num, center=mid, virtual_gate=virtual_gate, virtual_mids=virtual_mids)
-				rampmultiplefdac(fd, step_gate, sg_val)
 				break
 			case "entropy+transition":
 				ScanEntropyRepeat(center_first=0, balance_multiplier=1, width=width, hqpc_bias=hqpc_bias, additional_comments=", scan along transition, scan:"+num2str(i), sweeprate=sweeprate, two_part=0, repeats=repeats, num=num, center=mid)
@@ -327,7 +338,7 @@ function ScanEntropyRepeat([num, center_first, balance_multiplier, width, hqpc_b
 	num = paramisdefault(num) ? 										INF : num
 	center_first = paramisdefault(center_first) ? 				0 : center_first
 	balance_multiplier = paramisdefault(balance_multiplier) ? 	1 : balance_multiplier
-	hqpc_bias = paramisdefault(hqpc_bias) ? 						50 : hqpc_bias
+	hqpc_bias = paramisdefault(hqpc_bias) ? 						25 : hqpc_bias
 	repeat_multiplier = paramisDefault(repeat_multiplier) ? 	1 : repeat_multiplier
 	sweeprate = paramisdefault(sweeprate) ? 						100 : sweeprate
 	freq = paramisdefault(freq) ? 									12.5 : freq
@@ -387,9 +398,9 @@ function ScanEntropyRepeat([num, center_first, balance_multiplier, width, hqpc_b
 	string virtual_starts_ends
 	do
 		if(paramisdefault(num))
-			printf "Starting scan %d of \u221E\r", i
+			printf "Starting scan %d of \u221E\r", i+1
 		else
-			printf "Starting scan %d of %d\r", i, num
+			printf "Starting scan %d of %d\r", i+1, num
 		endif
 		if (two_part == 1)
 			ScanFastDACrepeat(fd, mid-width1, mid+width1, sweepgate, repeats1, sweeprate=sweeprate, delay=0.2, comments=comments+", part1of2", use_awg=1, nosave=nosave)
@@ -407,7 +418,7 @@ function ScanEntropyRepeat([num, center_first, balance_multiplier, width, hqpc_b
 				ScanFastDACrepeat(fd, mid-width1, mid+width1, sweepgate, r, sweeprate=sweeprate, delay=0.1, comments=comments, use_awg=1, nosave=nosave)
 			endif
 		endif
-		rampmultiplefdac(fd, sweep_gate, mid)
+		rampmultiplefdac(fd, sweepgate, mid)
 		i++
 	while (i<num)
 end
@@ -439,7 +450,7 @@ function ScanTransition([sweeprate, width, ramprate, repeats, center_first, cent
 		rampmultiplefdac(fd, sweep_gate, mid, ramprate=ramprate)
 		center_gate_mid = centerontransition(gate=center_gate, width=center_width, single_only=1)
 		mid = (cmpstr(center_gate, sweep_gate) == 0) ? center_gate_mid : mid  // If centering with sweepgate, update the mid value
-		printf "Centered at %s=%.2f mV\r" center_gate, mid
+		printf "Centered at %s=%.2f mV\r" center_gate, center_gate_mid
 		rampmultiplefdac(fd, sweep_gate, -width*0.5, ramprate=ramprate)
 		if (!paramisdefault(cs_target))
 			CorrectChargeSensor(fd=fd, fdchannelstr="CSQ", fadcID=fd, fadcchannel=0, check=0, direction=1, natarget=cs_target)
@@ -561,5 +572,6 @@ function DCbiasRepeats(max_current, num_steps, duration, [voltage_ratio])
 	rampmultipleFDAC(fd, current_channel, 0)
 	rampmultipleFDAC(fd, voltage_channel, 0)
 end
+
 
 

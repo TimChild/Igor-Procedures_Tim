@@ -192,7 +192,7 @@ function CorrectChargeSensor([bd, bdchannelstr, dmmid, fd, fdchannelstr, fadcID,
 	wave/T dacvalstr
 	wave/T fdacvalstr
 
-	natarget = paramisdefault(natarget) ? 1.630 : natarget
+	natarget = paramisdefault(natarget) ? 2.1 : natarget
 	direction = paramisdefault(direction) ? 1 : direction
 	zero_tol = paramisdefault(zero_tol) ? 0.5 : zero_tol  // How close to zero before it starts to get more averaged measurements
 
@@ -355,8 +355,8 @@ function CenterOnTransition([gate, virtual_gates, width, single_only])
 
 	nvar fd
 
-	gate = selectstring(paramisdefault(gate), gate, "LP*2")
-	width = paramisdefault(width) ? 50 : width
+	gate = selectstring(paramisdefault(gate), gate, "ACC*2")
+	width = paramisdefault(width) ? 20 : width
 
 	gate = SF_get_channels(gate, fastdac=1)
 
@@ -395,6 +395,7 @@ function loadFromHDF(datnum, [no_check])
 
 	bdLoadFromHDF(datnum, no_check = no_check)
 	fdLoadFromHDF(datnum, no_check = no_check)
+	sc_openinstrconnections(0)  // Connections may have been messed up by the temporary connections made when setting bd/fd DACs
 end
 
 
@@ -408,8 +409,6 @@ function saveLogsOnly([msg])
 	if (paramisdefault(msg))
 		msg = "SaveLogsOnly"
 	endif
-
-	abort "Need to check this works, hopefully it does"
 
 	variable hdfid = initOpenSaveFiles(0)
 	LogsOnlySave(hdfid, msg)

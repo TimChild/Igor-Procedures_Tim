@@ -192,7 +192,7 @@ function CorrectChargeSensor([bd, bdchannelstr, dmmid, fd, fdchannelstr, fadcID,
 	wave/T dacvalstr
 	wave/T fdacvalstr
 
-	natarget = paramisdefault(natarget) ? 2.1 : natarget
+	natarget = paramisdefault(natarget) ? 2.2 : natarget // 100uV => 2.1nA, 15uV => 0.40nA (different gate settings)
 	direction = paramisdefault(direction) ? 1 : direction
 	zero_tol = paramisdefault(zero_tol) ? 0.5 : zero_tol  // How close to zero before it starts to get more averaged measurements
 
@@ -240,6 +240,7 @@ function CorrectChargeSensor([bd, bdchannelstr, dmmid, fd, fdchannelstr, fadcID,
 
 	variable avg_len = 0.001// Starting time to avg, will increase as it gets closer to ideal value
 	if (abs(current-natarget) > end_condition/2)  // If more than half the end_condition out
+		variable start_time = datetime
 		do
 			//get current dac setting
 			if (!paramisdefault(bd))
@@ -299,8 +300,8 @@ function CorrectChargeSensor([bd, bdchannelstr, dmmid, fd, fdchannelstr, fadcID,
 				avg_len = 1
 			endif
 //			print avg_len
-
-		while (abs(current-nAtarget) > end_condition)   // Until reaching end condition
+			asleep(0.05)
+		while (abs(current-nAtarget) > end_condition && (datetime - start_time < 30))   // Until reaching end condition
 
 		if (!paramisDefault(i))
 			print "Ramped to " + num2str(nextdac) + "mV, at line " + num2str(i)
@@ -398,6 +399,25 @@ function loadFromHDF(datnum, [no_check])
 	sc_openinstrconnections(0)  // Connections may have been messed up by the temporary connections made when setting bd/fd DACs
 end
 
+
+function additionalSetupAfterLoadHDF()
+	// Use this function to ramp any other gates etc after loading from HDF (i.e. when loading from HDF in a function, call this after so that it's easy to load everything from HDF and then just correct a few more gates after
+	nvar fd, bd
+	nvar tim_global_variable1  // 2021/12/04  -- Using these to test many slightly different gate settings in an outer loop
+	nvar tim_global_variable2
+	nvar tim_global_variable3
+	
+	variable v1 = tim_global_variable1
+	variable v2 = tim_global_variable2	
+	variable v3 = tim_global_variable3
+		
+//	print v1, v2, v3
+	
+	rampmultiplefdac(fd, "SDP", -295 + v1)
+	rampmultiplefdac(fd, "CSS", -445 + v2)		
+	rampmultipleBD(bd, "SDBD", -505 + v3)
+
+end
 
 
 function saveLogsOnly([msg])

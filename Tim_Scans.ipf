@@ -104,7 +104,7 @@ function DotTuneAround(x, y, width_x, width_y, channelx, channely, [sweeprate, r
 	variable sweeprate, numptsy
 	string channelx, channely, csname, additional_comments
 
-	variable natarget = 2.1   // ADC reading in mV to get most sensitive part of CS
+	variable natarget = 2.2   // ADC reading in mV to get most sensitive part of CS
 	sweeprate = paramisdefault(sweeprate) ? 300 : sweeprate
 	numptsy = paramisdefault(numptsy) ? 21 : numptsy
 	csname = selectstring(paramisdefault(csname), csname, "CSQ")
@@ -137,7 +137,7 @@ end
 //////////////////////////////////////////////////////// Generally Useful Scan Functions ////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
-function ScanAlongTransition(step_gate, step_size, step_range, center_gate, sweep_gate, sweeprate, repeats, width, [center_step_ratio, centering_width, center_sweep_gate, scan_type, correct_cs_gate, sweep_gate_start, load_datnum, hqpc_bias, ramprate, num, correction_gate, corr_step_ratio, step_gate_isbd, mid, virtual_gate, natarget])
+function ScanAlongTransition(step_gate, step_size, step_range, center_gate, sweep_gate, sweeprate, repeats, width, [center_step_ratio, centering_width, center_sweep_gate, scan_type, correct_cs_gate, sweep_gate_start, load_datnum, hqpc_bias, ramprate, num, correction_gate, corr_step_ratio, step_gate_isbd, mid, virtual_gate, natarget, additional_Setup])
 	// Scan at many positions along a transition, centering on transition for each scan along the way.
 	// Rather than doing a true scan along transition, this just takes a series of short repeat measurements in small steps. Will make LOTS of dats, but keeps things a lot simpler
 	//
@@ -159,7 +159,8 @@ function ScanAlongTransition(step_gate, step_size, step_range, center_gate, swee
 	// step_gate_isbd: If step gate is on bd, set = 1
 	// mid: center value for sweepgate
 	// natarget: Target nA for current amp
-	variable step_size, step_range, center_step_ratio, sweeprate, repeats, center_sweep_gate, width, sweep_gate_start, load_datnum, centering_width, hqpc_bias, ramprate, num, corr_step_ratio, step_gate_isbd, mid, virtual_gate, natarget
+	// additional_setup: set to 1 to call additionalSetupAfterLoadHDF()  (i.e. useful if LoadfromHDF gets almost all the gates right, and then there a few minor tweaks after that).
+	variable step_size, step_range, center_step_ratio, sweeprate, repeats, center_sweep_gate, width, sweep_gate_start, load_datnum, centering_width, hqpc_bias, ramprate, num, corr_step_ratio, step_gate_isbd, mid, virtual_gate, natarget, additional_setup
 	string step_gate, center_gate, sweep_gate, correct_cs_gate, scan_type, correction_gate
 
 	center_step_ratio = paramisdefault(center_step_ratio) ? 0 : center_step_ratio
@@ -173,7 +174,7 @@ function ScanAlongTransition(step_gate, step_size, step_range, center_gate, swee
 	step_gate_isbd =  paramisDefault(step_gate_isbd) ? 0 : step_gate_isbd
 	variable step_gate_isfd = !step_gate_isbd
 	mid =  paramisDefault(mid) ? 0 : mid
-	natarget = paramisdefault(natarget) ? 2.1 : natarget 
+	natarget = paramisdefault(natarget) ? 2.1 : natarget //2.1 at 100uV, 0.4nA at 15uV
 	variable center_limit = -120  // Above this value in step gate, don't try to center (i.e. gamma broadened)
 
 
@@ -181,6 +182,9 @@ function ScanAlongTransition(step_gate, step_size, step_range, center_gate, swee
 
 	if (!paramIsDefault(load_datnum))
 		loadFromHDF(load_datnum, no_check=1)
+		if (additional_setup)
+			additionalSetupAfterLoadHDF()
+		endif
 		if (!paramisdefault(sweep_gate_start))
 			rampmultiplefdac(fd, sweep_gate, sweep_gate_start)
 		endif
@@ -264,6 +268,12 @@ function ScanAlongTransition(step_gate, step_size, step_range, center_gate, swee
 			case "transition":
 				virtual_mids = num2str(sg_val)
 				ScanTransition(sweeprate=sweeprate, width=width, ramprate=ramprate, repeats=repeats, center_first=center_sweep_gate, mid=mid, virtual_gate=virtual_gate, virtual_mids=virtual_mids)
+				break
+			case "dcbias_transition":
+				virtual_mids = num2str(sg_val)
+				rampmultipleFDAC(fd, "OHC(10M)", hqpc_bias)
+				rampmultipleFDAC(fd, "OHV*1000", hqpc_bias*-1.503)
+				ScanTransition(sweeprate=sweeprate, width=width, ramprate=ramprate, repeats=repeats, center_first=center_sweep_gate, mid=mid, virtual_gate=virtual_gate, virtual_mids=virtual_mids, additional_comments="dcbias="+num2str(hqpc_bias))
 				break
 			case "entropy":
 				virtual_mids = num2str(sg_val)
@@ -354,6 +364,9 @@ function ScanEntropyRepeat([num, center_first, balance_multiplier, width, hqpc_b
 	string centergate = "ACC*2"
 	variable center_width = 30
 
+	nvar sc_ResampleFreqCheckfadc
+	sc_ResampleFreqCheckfadc = 0  // Resampling in entropy measurements screws things up at the moment so turn it off (2021-12-02)
+
 	if (two_part == 1 && !paramisdefault(repeats))
 		abort "repeats is only meant to be set for a one part scan, not two part"
 	endif
@@ -425,8 +438,8 @@ end
 
 
 
-function ScanTransition([sweeprate, width, ramprate, repeats, center_first, center_gate, center_width, sweep_gate, additional_comments, mid, sweepgate_mid, cs_target, virtual_gate, virtual_mids, csqpc_gate])
-	variable sweeprate, width, ramprate, repeats, center_first, center_width, mid, sweepgate_mid, cs_target, virtual_gate
+function ScanTransition([sweeprate, width, ramprate, repeats, center_first, center_gate, center_width, sweep_gate, additional_comments, mid, cs_target, virtual_gate, virtual_mids, csqpc_gate])
+	variable sweeprate, width, ramprate, repeats, center_first, center_width, mid, cs_target, virtual_gate
 	string center_gate, sweep_gate, additional_comments, virtual_mids, csqpc_gate
 	nvar fd
 
@@ -437,7 +450,7 @@ function ScanTransition([sweeprate, width, ramprate, repeats, center_first, cent
 	width = paramisdefault(width) ? 2000 : width
 	ramprate = paramisDefault(ramprate) ? 10000 : ramprate
 	repeats = paramIsDefault(repeats) ? 10 : repeats
-	sweepgate_mid = paramIsDefault(sweepgate_mid) ? 0 : sweepgate_mid
+
 	// let center_first default to 0
 	sweep_gate = selectstring(paramisdefault(sweep_gate), sweep_gate, "ACC*400")
 	center_gate = selectstring(paramisdefault(center_gate), center_gate, "ACC*2")
@@ -506,7 +519,7 @@ function ScanTransitionMany()
 				rampmultiplefdac(fd, "SDP", Var1b[i])
 				for(repeats=0;repeats<1;repeats++)
 //					ScanEntropyRepeat(num=1, center_first=1, balance_multiplier=1, width=200, hqpc_bias=25, additional_comments="0->1 transition", repeat_multiplier=1, freq=12.5, sweeprate=25, two_part=0, repeats=5, center=0)
-					ScanTransition(sweeprate=25, width=400, repeats=2, center_first=1, center_gate="ACC*2", center_width=20, sweep_gate="ACC*400", additional_comments="rough check before entropy scans", sweepgate_mid=0, csqpc_gate="CSQ")
+					ScanTransition(sweeprate=25, width=400, repeats=2, center_first=1, center_gate="ACC*2", center_width=20, sweep_gate="ACC*400", additional_comments="rough check before entropy scans", csqpc_gate="CSQ")
 				endfor
 			endfor
 		endfor

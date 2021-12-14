@@ -1,22 +1,21 @@
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 //////////////////////////////////////////////////////////// Noise Measurements /////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-function standardNoiseMeasurement(ca_amp_setting, [instrID, channel, comments, nosave])
+function standardNoiseMeasurement([instrID, comments, nosave])
 	// Run standard noise measurement (i.e. 5x 12s scans with fastdac reading 12kHz)
 	// ca_amp_setting = amplification on current amp (i.e. for 1e8 enter 8)
-	variable ca_amp_setting, instrID, channel, nosave
+	variable instrID, nosave
 	string comments
 
 	if(paramIsDefault(instrID))
 		nvar fd
 		instrID = fd
 	endif
-	channel = paramIsDefault(channel) ? 0 : channel
 	comments = selectString(paramIsDefault(comments), comments, "")
 
 	variable current_freq = getFADCspeed(instrID)
 	setFADCSpeed(instrID, 12195)
-	FDacSpectrumAnalyzer(instrID,num2str(channel),12,numAverage=5,comments="noise, spectrum, "+comments, ca_amp=ca_amp_setting, nosave=nosave)
+	FDacSpectrumAnalyzer(instrID,12,numAverage=5,comments="noise, spectrum, "+comments, nosave=nosave)
 	setFADCSpeed(instrID, current_freq)
 end
 
@@ -48,11 +47,11 @@ function NoiseOnOffTranisiton()
 		mid = CenterOnTransition(gate="ACC*400", width=500, single_only=1)
 		printf "Center of transition at ACC*400 = %.2f\r", mid
 		asleep(3)
-		FDacSpectrumAnalyzer(fd,"0",30,numAverage=1,comments="noise, spectrum, On Transition", ca_amp=9)
+		FDacSpectrumAnalyzer(fd,30,numAverage=1,comments="noise, spectrum, On Transition")
 		rampmultipleFDAC(fd, "ACC*400", mid-500)
 
 		asleep(3)
-		FDacSpectrumAnalyzer(fd,"0",30,numAverage=1,comments="noise, spectrum, Off Transition", ca_amp=9)
+		FDacSpectrumAnalyzer(fd,30,numAverage=1,comments="noise, spectrum, Off Transition")
 		rampmultipleFDAC(fd, "ACC*400", mid)
 	endfor
 	
@@ -128,7 +127,7 @@ function DotTuneAround(x, y, width_x, width_y, channelx, channely, [sweeprate, r
 	endif
 	wave tempwave = $"cscurrent_2d"
 	nvar filenum
-	displaydiff(tempwave, filenum=filenum-1, x_label=GetLabel(SF_get_channels(channelx, fastdac=1), fastdac=1), y_label=GetLabel(SF_get_channels(channely, fastdac=1), fastdac=1))
+	displaydiff(tempwave, filenum=filenum-1, x_label=scu_getDacLabel(scu_getChannelNumbers(channelx, fastdac=1), fastdac=1), y_label=scu_getDacLabel(scu_getChannelNumbers(channely, fastdac=1), fastdac=1))
 end
 
 
@@ -200,21 +199,21 @@ function ScanAlongTransition(step_gate, step_size, step_range, center_gate, swee
 	do
 		// Get DAC val of step_gate
 		if (step_gate_isfd)
-			sg_val = str2num(fdacvalstr[str2num(SF_get_channels(step_gate, fastdac=1))][1])
+			sg_val = str2num(fdacvalstr[str2num(scu_getChannelNumbers(step_gate, fastdac=1))][1])
 		else
-			sg_val = str2num(dacvalstr[str2num(SF_get_channels(step_gate, fastdac=0))][1])
+			sg_val = str2num(dacvalstr[str2num(scu_getChannelNumbers(step_gate, fastdac=0))][1])
 		endif
 		
 		// Get DAC val of centering_gate
 		if (cmpstr(center_gate, sweep_gate) == 0)
 			cg_val = mid
 		else
-			cg_val = str2num(fdacvalstr[str2num(SF_get_channels(center_gate, fastdac=1))][1]) //get DAC val of centering_gate
+			cg_val = str2num(fdacvalstr[str2num(scu_getChannelNumbers(center_gate, fastdac=1))][1]) //get DAC val of centering_gate
 		endif
 		
 		// Get DAC val of correction_gate
 		if (!paramIsDefault(correction_gate))
-			corrg_val = str2num(fdacvalstr[str2num(SF_get_channels(correction_gate, fastdac=1))][1]) //get DAC val of correction_gate
+			corrg_val = str2num(fdacvalstr[str2num(scu_getChannelNumbers(correction_gate, fastdac=1))][1]) //get DAC val of correction_gate
 		endif
 
 		// Reset sweepgate
@@ -285,7 +284,7 @@ function ScanAlongTransition(step_gate, step_size, step_range, center_gate, swee
 				break
 			case "csq only":
 				RampMultiplefdac(fd, "ACC*1000", -10000)
-				csq_val = str2num(fdacvalstr[str2num(SF_get_channels("CSQ", fastdac=1))][1])
+				csq_val = str2num(fdacvalstr[str2num(scu_getChannelNumbers("CSQ", fastdac=1))][1])
 				ScanFastDAC(fd, csq_val-50, csq_val+50, "CSQ", sweeprate=100, nosave=0, comments="charge sensor trace")
 				RampMultiplefdac(fd, "ACC*1000", 0)
 				RampMultiplefdac(fd, "CSQ", csq_val)
@@ -301,7 +300,7 @@ end
 
 
 
-function StepTempScanSomething()
+function TimStepTempScanSomething()
 	nvar fd
 	svar ls370
 

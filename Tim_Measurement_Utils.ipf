@@ -129,7 +129,7 @@ function GetTargetCSCurrent([oldcscurr, lower_lim, upper_lim, nosave])
 	nvar fd
 	string channelstr = "CSQ"
 
-	channelstr = SF_get_channels(channelstr, fastdac=1)
+	channelstr = scu_getChannelNumbers(channelstr, fastdac=1)
 
 	lower_lim = paramisdefault(lower_lim) ? 1 : lower_lim
 	upper_lim = paramisdefault(upper_lim) ? 3 : upper_lim
@@ -211,14 +211,14 @@ function CorrectChargeSensor([bd, bdchannelstr, dmmid, fd, fdchannelstr, fadcID,
 	endif
 
 	if (!paramisdefault(fdchannelstr))
-		fdchannelstr = SF_get_channels(fdchannelstr, fastdac=1)
+		fdchannelstr = scu_getChannelNumbers(fdchannelstr, fastdac=1)
 		if(itemsInList(fdchannelstr, ",") != 1)
 			abort "ERROR[CorrectChargeSensor]: Only works with 1 fdchannel"
 		else
 			variable fdchannel = str2num(fdchannelstr)
 		endif
 	elseif (!paramisdefault(bdchannelstr))
-		bdchannelstr = SF_get_channels(bdchannelstr, fastdac=0)
+		bdchannelstr = scu_getChannelNumbers(bdchannelstr, fastdac=0)
 		if(itemsInList(bdchannelstr, ",") != 1)
 			abort "ERROR[CorrectChargeSensor]: Only works with 1 bdchannel"
 		else
@@ -261,7 +261,7 @@ function CorrectChargeSensor([bd, bdchannelstr, dmmid, fd, fdchannelstr, fadcID,
 					if (!paramisdefault(bd))
 						rampmultiplebd(bd, num2str(bdchannel), nextdac)
 					else
-						rampoutputfdac(fd, fdchannel, nextdac)
+						rampmultipleFDAC(fd, num2str(fdchannel), nextdac)
 					endif
 				else
 					abort "Failed to correct charge sensor to target current"
@@ -272,7 +272,7 @@ function CorrectChargeSensor([bd, bdchannelstr, dmmid, fd, fdchannelstr, fadcID,
 					if (!paramisdefault(bd))
 						rampmultiplebd(bd, num2str(bdchannel), nextdac)
 					else
-						rampoutputfdac(fd, fdchannel, nextdac)
+						rampmultipleFDAC(fd, num2str(fdchannel), nextdac)
 					endif
 				else
 					abort "Aborted"
@@ -359,7 +359,7 @@ function CenterOnTransition([gate, virtual_gates, width, single_only])
 	gate = selectstring(paramisdefault(gate), gate, "ACC*2")
 	width = paramisdefault(width) ? 20 : width
 
-	gate = SF_get_channels(gate, fastdac=1)
+	gate = scu_getChannelNumbers(gate, fastdac=1)
 
 	variable initial, mid
 	wave/t fdacvalstr

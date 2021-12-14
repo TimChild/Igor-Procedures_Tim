@@ -121,7 +121,7 @@ function plot_waterfall(w, x_label, y_label, [y_spacing])
 		tempwave[][i] = tempwave[p][i]+y_spacing*i
 		AppendToGraph tempwave[][i]
 	endfor
-	setupGraph1D(WinName(0,1), x_label, y_label=y_label)
+	scg_setupGraph1D(WinName(0,1), x_label, y_label=y_label)
 end
 
 function DisplayDiff(w, [x_label, y_label, filenum])

@@ -6,6 +6,109 @@
 ////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////// Setting up AWG ///////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////
+function makeSquareWaveAWG(instrID, v0, vP, vM, v0len, vPlen, vMlen, wave_num, [ramplen])  // TODO: move this to Tim's igor procedures
+   // Make square waves with form v0, +vP, v0, -vM (useful for Tim's Entropy)
+   // Stores copy of wave in Igor (accessible by fd_getAWGwave(wave_num))
+   // Note: Need to call, fd_setupAWG() after making new wave
+   // To make simple square wave set length of unwanted setpoints to zero.
+   variable instrID, v0, vP, vM, v0len, vPlen, vMlen, wave_num
+   variable ramplen  // lens in seconds
+   variable max_setpoints = 26
+
+
+	ramplen = paramisdefault(ramplen) ? 0.003 : ramplen
+
+	if (ramplen < 0)
+		abort "ERROR[makeSquareWaveAWG]: Cannot use a negative ramplen"
+	endif
+
+    // Open connection
+    sc_openinstrconnections(0)
+
+   // put inputs into waves to make them easier to work with
+   make/o/free sps = {v0, vP, v0, vM} // CHANGE refers to output
+   make/o/free lens = {v0len, vPlen, v0len, vMlen}
+
+   // Sanity check on period
+   // Note: limit checks happen in AWG_RAMP
+   if (sum(lens) > 1)
+      string msg
+      sprintf msg "Do you really want to make a square wave with period %.3gs?", sum(lens)
+      variable ans = ask_user(msg, type=1)
+      if (ans == 2)
+         abort "User aborted"
+      endif
+   endif
+   // Ensure that ramplen is not too long (will never reach setpoints)
+   variable i=0
+   for(i=0;i<numpnts(lens);i++)
+    if (lens[i] < ramplen)
+      msg = "Do you really want to ramp for longer than the duration of a setpoint? You will never reach the setpoint"
+      ans = ask_user(msg, type=1)
+      if (ans == 2)
+         abort "User aborted"
+      endif
+    endif
+   endfor
+
+
+    // Get current measureFreq to calculate require sampleLens to achieve durations in s
+   variable measureFreq = getFADCmeasureFreq(instrID)
+   variable numSamples = 0
+
+   // Make wave
+   variable j=0, k=0
+   variable max_ramp_per_setpoint = floor((max_setpoints - numpnts(sps))/numpnts(sps)) // CHANGE setpoint per ramp
+   variable ramp_per_setpoint = min(max_ramp_per_setpoint, floor(measureFreq * ramplen)) // CHANGE to ramp_step_size
+   variable ramp_setpoint_duration = 0
+
+   if (ramp_per_setpoint != 0)
+     ramp_setpoint_duration = ramplen / ramp_per_setpoint
+   endif
+
+   // make wave to store setpoints/sample_lengths, correctly sized
+   make/o/free/n=((numpnts(sps)*ramp_per_setpoint + numpnts(sps)), 2) awg_sqw
+
+   //Initialize prev_setpoint to the last setpoint
+   variable prev_setpoint = sps[numpnts(sps) - 1]
+   variable ramp_step = 0
+   for(i=0;i<numpnts(sps);i++)
+      if(lens[i] != 0)  // Only add to wave if duration is non-zero
+         // Ramps happen at the beginning of a setpoint and use the 'previous' wave setting to compute
+         // where to ramp from. Obviously this does not work for the first wave length, is that avoidable?
+         ramp_step = (sps[i] - prev_setpoint)/(ramp_per_setpoint + 1)
+         for (k = 1; k < ramp_per_setpoint+1; k++)
+          // THINK ABOUT CASE CASE RAMPLEN 0 -> ramp_setpoint_furation = 0
+          numSamples = round(ramp_setpoint_duration * measureFreq)
+          awg_sqw[j][0] = {prev_setpoint + (ramp_step * k)}
+          awg_sqw[j][1] = {numSamples}
+          j++
+         endfor
+         numSamples = round((lens[i]-ramplen)*measureFreq)  // Convert to # samples
+         if(numSamples == 0)  // Prevent adding zero length setpoint
+            abort "ERROR[Set_multi_square_wave]: trying to add setpoint with zero length, duration too short for sampleFreq"
+         endif
+         awg_sqw[j][0] = {sps[i]}
+         awg_sqw[j][1] = {numSamples}
+         j++ // Increment awg_sqw position for storing next setpoint/sampleLen
+         prev_setpoint = sps[i]
+      endif
+   endfor
+
+
+    // Check there is a awg_sqw to add
+   if(numpnts(awg_sqw) == 0)
+      abort "ERROR[Set_multi_square_wave]: No setpoints added to awg_sqw"
+   endif
+
+    // Clear current wave and then reset with new awg_sqw
+   fd_clearAWGwave(instrID, wave_num)
+   fd_addAWGwave(instrID, wave_num, awg_sqw)
+
+   // Make sure user sets up AWG_list again after this change using fd_setupAWG()
+   fd_setAWGuninitialized()
+end
+
 
 function SetupEntropySquareWaves([freq, cycles, hqpc_plus, hqpc_minus, channel_ratio, balance_multiplier, hqpc_bias_multiplier, ramplen])
 	variable freq, cycles, hqpc_plus, hqpc_minus, channel_ratio, balance_multiplier, hqpc_bias_multiplier, ramplen
@@ -27,12 +130,12 @@ function SetupEntropySquareWaves([freq, cycles, hqpc_plus, hqpc_minus, channel_r
 	variable spt
 	// Make square wave 0
 	spt = 1/(4*freq)  // Convert from freq to setpoint time /s  (4 because 4 setpoints per wave)
-	fdAWG_make_multi_square_wave(fd, 0, splus, sminus, spt, spt, spt, 0, ramplen=ramplen)
+	makeSquareWaveAWG(fd, 0, splus, sminus, spt, spt, spt, 0, ramplen=ramplen)
 	// Make square wave 1
-	fdAWG_make_multi_square_wave(fd, 0, cplus, cminus, spt, spt, spt, 1, ramplen=ramplen)
+	makeSquareWaveAWG(fd, 0, cplus, cminus, spt, spt, spt, 1, ramplen=ramplen)
 
 	// Setup AWG
-	fdAWG_setup_AWG(fd, AWs="0,1", DACs="OHC(10M),OHV*1000", numCycles=cycles)
+	setupAWG(fd, AWs="0,1", DACs="OHC(10M),OHV*1000", numCycles=cycles)
 end
 
 
@@ -57,12 +160,12 @@ function SetupEntropySquareWaves_unequal([freq, cycles, hqpc_plus, hqpc_minus, r
 	variable spt
 	// Make square wave 0
 	spt = 1/(4*freq)  // Convert from freq to setpoint time /s  (4 because 4 setpoints per wave)
-	fdAWG_make_multi_square_wave(fd, 0, splus, sminus, spt, spt, spt, 0, ramplen=ramplen)
+	makeSquareWaveAWG(fd, 0, splus, sminus, spt, spt, spt, 0, ramplen=ramplen)
 	// Make square wave 1
-	fdAWG_make_multi_square_wave(fd, 0, cplus, cminus, spt, spt, spt, 1, ramplen=ramplen)
+	makeSquareWaveAWG(fd, 0, cplus, cminus, spt, spt, spt, 1, ramplen=ramplen)
 
 	// Setup AWG
-	fdAWG_setup_AWG(fd, AWs="0,1", DACs="HO1/10M,HO2*1000", numCycles=cycles)
+	setupAWG(fd, AWs="0,1", DACs="HO1/10M,HO2*1000", numCycles=cycles)
 end
 
 
@@ -90,7 +193,7 @@ function Set_multi_square_wave(instrID, v0, vP, vM, v0len, vPlen, vMlen, wave_nu
    endif
 
    // make wave to store setpoints/sample_lengths
-   make/o/free/n=(-1, 2) awg_sqw 
+   make/o/free/n=(-1, 2) awg_sqw
 
    variable samplingFreq = getFADCspeed(instrID)  // Gets sampling rate of FD (Note: NOT measureFreq here)
    variable numSamples = 0
@@ -111,8 +214,8 @@ function Set_multi_square_wave(instrID, v0, vP, vM, v0len, vPlen, vMlen, wave_nu
       abort "ERROR[Set_multi_square_wave]: No setpoints added to awg_sqw"
    endif
 
-   fdAWG_clear_wave(instrID, wave_num)
-   fdAWG_add_wave(instrID, wave_num, awg_sqw)
+   fd_clearAWGwave(instrID, wave_num)
+   fd_addAWGwave(instrID, wave_num, awg_sqw)
    printf "Set square wave on AWG_wave%d", wave_num
 end
 
@@ -406,15 +509,15 @@ function additionalSetupAfterLoadHDF()
 	nvar tim_global_variable1  // 2021/12/04  -- Using these to test many slightly different gate settings in an outer loop
 	nvar tim_global_variable2
 	nvar tim_global_variable3
-	
+
 	variable v1 = tim_global_variable1
-	variable v2 = tim_global_variable2	
+	variable v2 = tim_global_variable2
 	variable v3 = tim_global_variable3
-		
+
 //	print v1, v2, v3
-	
+
 	rampmultiplefdac(fd, "SDP", -295 + v1)
-	rampmultiplefdac(fd, "CSS", -445 + v2)		
+	rampmultiplefdac(fd, "CSS", -445 + v2)
 	rampmultipleBD(bd, "SDBD", -505 + v3)
 
 end
@@ -472,7 +575,7 @@ end
 function/T get_virtual_scan_params(mid, width1, virtual_mids, ratios)
 	variable mid, width1
 	string virtual_mids, ratios
-	
+
 	abort "2021/11 -- Somehow this function got lost, will need to be remade to be used again"
 end
 
@@ -485,9 +588,9 @@ function/wave Linspace(start, fin, num)
 	//		make/o/n=num tempwave
 	// 		tempwave = linspace(start, fin, num)[p]
 	//
-	// To use in a function: 
+	// To use in a function:
 	//		wave tempwave = linspace(start, fin, num)  //Can be done ONCE (each linspace overwrites itself!)
-	//	or 
+	//	or
 	//		make/n=num tempwave = linspace(start, fin, num)[p]  //Can be done MANY times
 	//
 	// To combine linspaces:

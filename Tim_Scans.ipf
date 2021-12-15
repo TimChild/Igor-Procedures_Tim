@@ -15,7 +15,7 @@ function standardNoiseMeasurement([instrID, comments, nosave])
 
 	variable current_freq = getFADCspeed(instrID)
 	setFADCSpeed(instrID, 12195)
-	FDacSpectrumAnalyzer(instrID,12,numAverage=5,comments="noise, spectrum, "+comments, nosave=nosave)
+	FDSpectrumAnalyzer(instrID,12,numAverage=5,comments="noise, spectrum, "+comments, nosave=nosave)
 	setFADCSpeed(instrID, current_freq)
 end
 
@@ -26,7 +26,7 @@ function QpcStabilitySweeps()
 	variable pinchoff = -450
 	variable depletion = -50
 
-	ScanfastDACRepeat(fd, depletion, pinchoff, "CSQ,CSS", 20, sweeprate=abs(depletion-pinchoff)/90, alternate=1, comments="repeat, alternating, checking stability of CS gates", nosave=0)
+	ScanfastDAC(fd, depletion, pinchoff, "CSQ,CSS", numptsy=20, sweeprate=abs(depletion-pinchoff)/90, alternate=1, comments="repeat, alternating, checking stability of CS gates", nosave=0)
 	rampmultipleFDAC(fd, "CSQ,CSS", 0)
 end
 
@@ -47,11 +47,11 @@ function NoiseOnOffTranisiton()
 		mid = CenterOnTransition(gate="ACC*400", width=500, single_only=1)
 		printf "Center of transition at ACC*400 = %.2f\r", mid
 		asleep(3)
-		FDacSpectrumAnalyzer(fd,30,numAverage=1,comments="noise, spectrum, On Transition")
+		FDSpectrumAnalyzer(fd,30,numAverage=1,comments="noise, spectrum, On Transition")
 		rampmultipleFDAC(fd, "ACC*400", mid-500)
 
 		asleep(3)
-		FDacSpectrumAnalyzer(fd,30,numAverage=1,comments="noise, spectrum, Off Transition")
+		FDSpectrumAnalyzer(fd,30,numAverage=1,comments="noise, spectrum, Off Transition")
 		rampmultipleFDAC(fd, "ACC*400", mid)
 	endfor
 	
@@ -415,8 +415,8 @@ function ScanEntropyRepeat([num, center_first, balance_multiplier, width, hqpc_b
 			printf "Starting scan %d of %d\r", i+1, num
 		endif
 		if (two_part == 1)
-			ScanFastDACrepeat(fd, mid-width1, mid+width1, sweepgate, repeats1, sweeprate=sweeprate, delay=0.2, comments=comments+", part1of2", use_awg=1, nosave=nosave)
-			ScanFastDACrepeat(fd, mid-width2, mid+width2, sweepgate, repeats2, sweeprate=sweeprate, delay=0.2, comments=comments+", part2of2", use_awg=1, nosave=nosave)
+			ScanFastDAC(fd, mid-width1, mid+width1, sweepgate, numptsy=repeats1, sweeprate=sweeprate, delay=0.2, comments=comments+", part1of2", use_awg=1, nosave=nosave)
+			ScanFastDAC(fd, mid-width2, mid+width2, sweepgate, numptsy=repeats2, sweeprate=sweeprate, delay=0.2, comments=comments+", part2of2", use_awg=1, nosave=nosave)
 		else
 			if (!paramisDefault(repeats) && repeats > 0)
 				r = repeats
@@ -425,9 +425,9 @@ function ScanEntropyRepeat([num, center_first, balance_multiplier, width, hqpc_b
 			endif
 			if (virtual_gate)
 				virtual_starts_ends = get_virtual_scan_params(mid, width1, virtual_mids, ratios)
-				ScanFastDACrepeat(fd, 0, 0, addlistItem(virtual_gates, sweepgate, ",", INF), r, starts=stringfromlist(0, virtual_starts_ends), fins=stringfromlist(1, virtual_starts_ends), sweeprate=sweeprate, delay=0.1, comments=comments, use_awg=1, nosave=nosave)
+				ScanFastDAC(fd, 0, 0, addlistItem(virtual_gates, sweepgate, ",", INF), numptsy=r, starts=stringfromlist(0, virtual_starts_ends), fins=stringfromlist(1, virtual_starts_ends), sweeprate=sweeprate, delay=0.1, comments=comments, use_awg=1, nosave=nosave)
 			else
-				ScanFastDACrepeat(fd, mid-width1, mid+width1, sweepgate, r, sweeprate=sweeprate, delay=0.1, comments=comments, use_awg=1, nosave=nosave)
+				ScanFastDAC(fd, mid-width1, mid+width1, sweepgate, numptsy=r, sweeprate=sweeprate, delay=0.1, comments=comments, use_awg=1, nosave=nosave)
 			endif
 		endif
 		rampmultiplefdac(fd, sweepgate, mid)
@@ -474,9 +474,9 @@ function ScanTransition([sweeprate, width, ramprate, repeats, center_first, cent
 	string virtual_starts_ends
 	if (virtual_gate)
 		virtual_starts_ends = get_virtual_scan_params(mid, width, virtual_mids, ratios)
-		ScanFastDACrepeat(fd, 0, 0, addlistItem(virtual_gates, sweep_gate, ",", INF), repeats, starts=stringfromlist(0, virtual_starts_ends), fins=stringfromlist(1, virtual_starts_ends), sweeprate=sweeprate, ramprate=ramprate, delay=0.01, comments="transition, repeat" + additional_comments, nosave=0)
+		ScanFastDAC(fd, 0, 0, addlistItem(virtual_gates, sweep_gate, ",", INF), numptsy=repeats, starts=stringfromlist(0, virtual_starts_ends), fins=stringfromlist(1, virtual_starts_ends), sweeprate=sweeprate, ramprate=ramprate, delay=0.01, comments="transition, repeat" + additional_comments, nosave=0)
 	else
-		ScanFastDACrepeat(fd, mid-width, mid+width, sweep_gate, repeats, sweeprate=sweeprate, ramprate=ramprate, delay=0.01, comments="transition, repeat" + additional_comments, nosave=0)
+		ScanFastDAC(fd, mid-width, mid+width, sweep_gate, numptsy=repeats, sweeprate=sweeprate, ramprate=ramprate, delay=0.01, comments="transition, repeat" + additional_comments, nosave=0)
 	endif
 	rampmultiplefdac(fd, sweep_gate, mid, ramprate=ramprate)
 end
@@ -558,7 +558,7 @@ function DCbiasRepeats(max_current, num_steps, duration, [voltage_ratio])
 	rampmultipleFDAC(fd, current_channel, 0)
 	rampmultipleFDAC(fd, voltage_channel, 0)
 	sprintf comments, "DCbias Repeat, zero bias"
-	ScanFastDACRepeat(fd, -scan_width, scan_width, "ACC*400", repeats, ramprate=rampratex, sweeprate=sweeprate, comments=comments, nosave=0)
+	ScanFastDAC(fd, -scan_width, scan_width, "ACC*400", numptsy=repeats, ramprate=rampratex, sweeprate=sweeprate, comments=comments, nosave=0)
 
 	// Measure with non-zero bias
 	variable setpoint
@@ -570,13 +570,13 @@ function DCbiasRepeats(max_current, num_steps, duration, [voltage_ratio])
 		rampmultipleFDAC(fd, current_channel, setpoint)
 		rampmultipleFDAC(fd, voltage_channel, -setpoint*voltage_ratio)
 		sprintf comments, "DCbias Repeat, %.3f nA" setpoint/current_resistor
-		ScanFastDACRepeat(fd, -scan_width, scan_width, "ACC*400", repeats, ramprate=rampratex, sweeprate=sweeprate, comments=comments, nosave=0)
+		ScanFastDAC(fd, -scan_width, scan_width, "ACC*400", numptsy=repeats, ramprate=rampratex, sweeprate=sweeprate, comments=comments, nosave=0)
 
 		// Measure negative bias
 		rampmultipleFDAC(fd, current_channel, -setpoint)
 		rampmultipleFDAC(fd, voltage_channel, setpoint*voltage_ratio)
 		sprintf comments, "DCbias Repeat, %.3f nA" -setpoint/current_resistor
-		ScanFastDACRepeat(fd, -scan_width, scan_width, "ACC*400", repeats, ramprate=rampratex, sweeprate=sweeprate, comments=comments, nosave=0)
+		ScanFastDAC(fd, -scan_width, scan_width, "ACC*400", numptsy=repeats, ramprate=rampratex, sweeprate=sweeprate, comments=comments, nosave=0)
 
 	endfor
 

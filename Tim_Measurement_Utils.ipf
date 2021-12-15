@@ -251,7 +251,7 @@ function GetTargetCSCurrent([oldcscurr, lower_lim, upper_lim, nosave])
 	variable oldcenter = str2num(fdacvalstr[str2num(channelstr)][1])
 
 	// Sweep CSQ +/- 20 mV around the current setting to get the charge sensor curve
-	ScanFastDAC(fd, oldcenter-20, oldcenter+20, channelstr, numpts=10000, nosave=nosave, comments="Finding steepest part of CSQ, CSQ scan")
+	ScanFastDAC(fd, oldcenter-20, oldcenter+20, channelstr, numptsx=10000, nosave=nosave, comments="Finding steepest part of CSQ, CSQ scan")
 	wave cscurrent
 
 	duplicate/o/free cscurrent cscurrentdiff

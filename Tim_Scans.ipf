@@ -75,6 +75,7 @@ function checkPinchOffs(instrID, channels, gate_names, ohmic_names, max_bias, [r
 	string channels, gate_names, ohmic_names
 
 	reset_zero = paramIsDefault(reset_zero) ? 1 : reset_zero
+	gate_names = selectString(strlen(gate_names)>0, channels, gate_names)
 
 	string buffer
 	sprintf buffer, "Pinch off, Gates=%s, Ohmics=%s", gate_names, ohmic_names
@@ -84,16 +85,18 @@ function checkPinchOffs(instrID, channels, gate_names, ohmic_names, max_bias, [r
 	endif
 end
 
-function PinchTestBD(bd, start, fin, channels, numpts, delay, ramprate, current_wave, cutoff_nA, gates_str)
-	/// For testing pinch off (10/2/2020)
+function PinchTestBD(bd, start, fin, channels, numpts, delay, ramprate, current_wave, cutoff_nA, gate_names, ohmic_names)
+	/// For testing pinch off (12/2021)
 	// Make sure current wave is in nA
 	variable bd, start, fin, numpts, delay, ramprate, cutoff_nA
-	string channels, current_wave, gates_str
+	string channels, current_wave, gate_names, ohmic_names
+	
+	gate_names = selectString(strlen(gate_names)>0, channels, gate_names)
+
 	rampmultiplebd(bd, channels, 0, ramprate=ramprate)
 	string comment
-	sprintf comment, "pinch, gates=(%s)", gates_str
-	abort "needs reimplmenting"
-//	ScanBabyDACUntil(bd, start, fin, channels, numpts, delay, ramprate, current_wave, cutoff_nA, operator="<", comments=comment)
+	sprintf comment, "Pinch off, Gates=%s, Ohmics=%s", gate_names, ohmic_names
+	ScanBabyDACUntil(bd, start, fin, channels, numpts, delay, ramprate, current_wave, cutoff_nA, operator="<", y_label="Current /nA", comments=comment)
 	rampmultiplebd(bd, channels, 0, ramprate=ramprate)
 end
 
@@ -107,7 +110,6 @@ function DotTuneAround(x, y, width_x, width_y, channelx, channely, [sweeprate, r
 	sweeprate = paramisdefault(sweeprate) ? 300 : sweeprate
 	numptsy = paramisdefault(numptsy) ? 21 : numptsy
 	csname = selectstring(paramisdefault(csname), csname, "CSQ")
-	ramprate_x = paramisdefault(ramprate_x) ? 1000 : ramprate_x
 	nosave = paramisdefault(nosave) ? 0 : nosave
 	additional_comments = selectstring(numtype(strlen(additional_comments)) != 0, additional_comments, "")
 
@@ -121,9 +123,9 @@ function DotTuneAround(x, y, width_x, width_y, channelx, channely, [sweeprate, r
 
 	CorrectChargeSensor(fd=fd, fdchannelstr=csname, fadcID=fd, fadcchannel=0, check=0, natarget=natarget, direction=1)
 	if (y_is_bd)
-		ScanFastDAC2D(fd, x-width_x, x+width_x, channelx, y-width_y, y+width_y, channely, numptsy, bdID = bd, sweeprate=sweeprate, rampratex=ramprate_x, nosave=nosave, comments="Dot Tuning"+additional_comments)
+		ScanFastDAC2D(fd, x-width_x, x+width_x, channelx, y-width_y, y+width_y, channely, numptsy, bdID = bd, sweeprate=sweeprate, rampratex=ramprate_x, nosave=nosave, comments="Dot Tuning, "+additional_comments)
 	else
-		ScanFastDAC2D(fd, x-width_x, x+width_x, channelx, y-width_y, y+width_y, channely, numptsy, sweeprate=sweeprate, rampratex=ramprate_x, nosave=nosave, comments="Dot Tuning"+additional_comments)
+		ScanFastDAC2D(fd, x-width_x, x+width_x, channelx, y-width_y, y+width_y, channely, numptsy, sweeprate=sweeprate, rampratex=ramprate_x, nosave=nosave, comments="Dot Tuning, "+additional_comments)
 	endif
 	wave tempwave = $"cscurrent_2d"
 	nvar filenum

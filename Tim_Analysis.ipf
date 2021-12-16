@@ -684,23 +684,23 @@ function fitcharge1D(dat)
 	Vmid = V_minloc
 
 	Make/D/O/N=5 W_coef
-	wavestats/Q/M=1/R=(Vmid-10,Vmid+10) dat //wavestats close to the transition (in mV, not dat points)
+	wavestats/Q/M=1/R=(Vmid-500,Vmid+500) dat //wavestats close to the transition (in mV, not dat points)
 					//Scale y,   y offset, theta(width), mid, tilt
-	w_coef[0] = {-(v_max-v_min), v_avg, 	abs((v_maxloc-v_minloc)/10), 	Vmid, 0} //TODO: Check theta is a good estimate
-	duplicate/O w_coef w_coeftemp //TODO: make /FREE
+	w_coef[0] = {-(v_max-v_min), v_avg, 	abs((v_maxloc-v_minloc)/3), 	Vmid, 0}
+	duplicate/O/Free w_coef w_coeftemp 
 	funcFit/Q Chargetransition W_coef dat /D
 	wave w_sigma
-	if(w_sigma[3] < 2) //Check Vmid was a good fit (Highly dependent on fridge temp and other dac values e.g. sometimes <0.03 consistently)
+	if(w_sigma[3] < 20) //Check Vmid was a good fit (Highly dependent on fridge temp and other dac values e.g. sometimes <0.03 consistently)
 		return w_coef[3]
 	endif
 	make/O/N=2 cm_coef = 0
-	duplicate/O/R=(-inf, vmid-5) dat datline //so hopefully just the gradient of the line leading up to the transition and not including the transition
+	duplicate/O/R=(-inf, vmid-100) dat datline //so hopefully just the gradient of the line leading up to the transition and not including the transition
 	curvefit/Q line kwCWave = cm_coef datline /D
 	w_coef = w_coeftemp
 	w_coef[1] = cm_coef[0]
 	w_coef[4] = cm_coef[1]
 	funcFit/Q Chargetransition W_coef dat /D	//try again with new set of w_coef
-	if	(w_sigma[3] < 0.5)
+	if	(w_sigma[3] < 20)
 		return w_coef[3]
 	else
 		print "Bad Vmid = " + num2str(w_coef[3]) + " +- " + num2str(w_sigma[3]) + " near Vmid = " + num2str(Vmid)

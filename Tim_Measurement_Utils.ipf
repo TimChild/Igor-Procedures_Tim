@@ -422,7 +422,7 @@ function FindTransitionMid(dat, [threshold]) //Finds mid by differentiating, ret
 	wave dat
 	variable threshold
 	variable MinVal, MinLoc, w, lower, upper
-	threshold = paramisDefault(threshold) ? 2 : threshold  //was 3 before 11thMar2020
+	threshold = paramisDefault(threshold) ? 2 : threshold 
 	wavestats/Q dat //easy way to get num notNaNs
 	w = V_npnts/5 //width to smooth by (relative to how many datapoints taken)
 	redimension/N=-1 dat
@@ -539,37 +539,6 @@ function saveLogsOnly([msg])
 	initcloseSaveFiles(num2str(hdfid))
 end
 
-
-function WaitTillTempStable(instrID, targetTmK, times, delay, err)
-	// instrID is the lakeshore controller ID
-	// targetmK is the target temperature in mK
-	// times is the number of readings required to call a temperature stable
-	// delay is the time between readings
-	// err is a percent error that is acceptable in the readings
-	string instrID
-	variable targetTmK, times, delay, err
-	variable passCount, targetT=targetTmK/1000, currentT = 0
-
-	// check for stable temperature
-	print "Target temperature: ", targetTmK, "mK"
-
-	variable j = 0
-	for (passCount=0; passCount<times; )
-		asleep(delay)
-		for (j = 0; j<10; j+=1)
-			currentT += getLS370temp(instrID, "mc")/10 // do some averaging
-			asleep(2.1)
-		endfor
-		if (ABS(currentT-targetT) < err*targetT)
-			passCount+=1
-			print "Accepted", passCount, " @ ", currentT, "K"
-		else
-			print "Rejected", passCount, " @ ", currentT, "K"
-			passCount = 0
-		endif
-		currentT = 0
-	endfor
-end
 
 
 function/T get_virtual_scan_params(mid, width1, virtual_mids, ratios)

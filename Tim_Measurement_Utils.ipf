@@ -119,7 +119,7 @@ function SetupEntropySquareWaves([freq, cycles, hqpc_plus, hqpc_minus, channel_r
 	cycles = paramisdefault(cycles) ? 1 : cycles
 	hqpc_plus = paramisdefault(hqpc_plus) ? 50 : hqpc_plus
 	hqpc_minus = paramisdefault(hqpc_minus) ? -50 : hqpc_minus
-	channel_ratio = paramisdefault(channel_ratio) ? -1.503 : channel_ratio  //Using OHC, OHV
+	channel_ratio = paramisdefault(channel_ratio) ? -1.478 : channel_ratio  //Using OHC, OHV
 	ramplen = paramisdefault(ramplen) ? 0 : ramplen
 
 	nvar fd
@@ -295,7 +295,7 @@ function CorrectChargeSensor([bd, bdchannelstr, dmmid, fd, fdchannelstr, fadcID,
 	wave/T dacvalstr
 	wave/T fdacvalstr
 
-	natarget = paramisdefault(natarget) ? 2.2 : natarget // 100uV => 2.1nA, 15uV => 0.40nA (different gate settings)
+	natarget = paramisdefault(natarget) ? 0.13 : natarget // 
 	direction = paramisdefault(direction) ? 1 : direction
 	zero_tol = paramisdefault(zero_tol) ? 0.5 : zero_tol  // How close to zero before it starts to get more averaged measurements
 
@@ -516,10 +516,12 @@ function additionalSetupAfterLoadHDF()
 
 //	print v1, v2, v3
 
-	rampmultiplefdac(fd, "SDP", -295 + v1)
-	rampmultiplefdac(fd, "CSS", -445 + v2)
-	rampmultipleBD(bd, "SDBD", -505 + v3)
+	rampmultiplefdac(fd, "SDP", str2num(scf_getDacInfo("SDP", "output")) + v1)
+	rampmultipleBD(bd, "SDBD", GetBDdacValue("SDBD") + v2)
+	rampmultiplefdac(fd, "CSS", str2num(scf_getDacInfo("CSS", "output")) + v3)	
+	rampmultiplefdac(fd, "ACC*2", str2num(scf_getDacInfo("ACC*2", "output")) - 0.5*v1 - 0.5*v2 - 0.5*v3)  // Somewhat corrected based on other changes	
 
+	rampmultiplebd(bd, "OCSB*1000", 8.7)
 end
 
 

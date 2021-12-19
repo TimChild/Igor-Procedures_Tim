@@ -671,36 +671,44 @@ function PlotEntropy([ErrorCutOff])
 end
 
 
-function fitcharge1D(dat)
-	wave dat
-	variable Vmid, w
-	redimension/N=-1 dat
-	duplicate/FREE dat datSmooth
-	wavestats/Q/M=1 dat //easy way to get num notNaNs (M=1 only calculates a few wavestats)
-	w = V_npnts/10 //width to smooth by (relative to how many datapoints taken)
-	smooth w, datSmooth	//Smooth dat so differentiate works better
-	differentiate datSmooth /D=datdiff
-	wavestats/Q/M=1 datdiff
+function TransitionCenterFromFit(w)
+	wave w
+	variable Vmid, smooth_width
+	// Get rough middle from differentiating
+	redimension/N=-1 w
+	duplicate/FREE w wSmooth
+	wavestats/Q/M=1 w //easy way to get num notNaNs (M=1 only calculates a few wavestats)
+	smooth_width = V_npnts/10 //width to smooth by (relative to how many datapoints taken)
+	smooth smooth_width, wSmooth	//Smooth wave so differentiate works better
+	differentiate wSmooth /D=wSmoothDiff
+	wavestats/Q/M=1 wSmoothDiff
 	Vmid = V_minloc
-
+	
+	// Estimate fit parameters
 	Make/D/O/N=5 W_coef
-	wavestats/Q/M=1/R=(Vmid-500,Vmid+500) dat //wavestats close to the transition (in mV, not dat points)
-					//Scale y,   y offset, theta(width), mid, tilt
+	wavestats/Q/M=1/R=[V_minRowLoc-V_npnts/5, V_minRowLoc+V_npnts/5] w //wavestats close to the transition (in mV, not dat points)
+					//Amp,   			Const, 	Theta, 							Mid,	Linear
 	w_coef[0] = {-(v_max-v_min), v_avg, 	abs((v_maxloc-v_minloc)/3), 	Vmid, 0}
 	duplicate/O/Free w_coef w_coeftemp 
-	funcFit/Q Chargetransition W_coef dat /D
+	
+	// Fit with initial param guess
+	funcFit/Q Chargetransition W_coef w 
 	wave w_sigma
-	if(w_sigma[3] < 20) //Check Vmid was a good fit (Highly dependent on fridge temp and other dac values e.g. sometimes <0.03 consistently)
+	variable scan_width = abs(rightx(w)-leftx(w))
+	if(w_sigma[3] < scan_width/10) // Check Vmid was a good fit by seeing if uncertainty is <1/10 width of scan
 		return w_coef[3]
 	endif
+	
+	// Otherwise get a better guess of the linear component
 	make/O/N=2 cm_coef = 0
-	duplicate/O/R=(-inf, vmid-100) dat datline //so hopefully just the gradient of the line leading up to the transition and not including the transition
-	curvefit/Q line kwCWave = cm_coef datline /D
+	duplicate/O/Free/R=(leftx(w), vmid-scan_width/5) w wBeforeTransition //so hopefully just the gradient of the line leading up to the transition and not including the transition
+	curvefit/Q line kwCWave = cm_coef wBeforeTransition /D
+	
+	// Fit again with better slope estimate
 	w_coef = w_coeftemp
-	w_coef[1] = cm_coef[0]
-	w_coef[4] = cm_coef[1]
-	funcFit/Q Chargetransition W_coef dat /D	//try again with new set of w_coef
-	if	(w_sigma[3] < 20)
+	w_coef[4] = cm_coef[1] // Slope
+	funcFit/Q Chargetransition W_coef w	  //try again with new set of w_coef
+	if	(w_sigma[3] < scan_width/10)
 		return w_coef[3]
 	else
 		print "Bad Vmid = " + num2str(w_coef[3]) + " +- " + num2str(w_sigma[3]) + " near Vmid = " + num2str(Vmid)
@@ -708,41 +716,7 @@ function fitcharge1D(dat)
 	endif
 end
 
-function fitchargetransition(dat)
-	// Takes 2D dat, puts fit paramters in fitwave
-	wave dat
 
-	variable G2, Vmid, G0, theta, gam
-	variable i=0
-
-
-//	make /O /N=(dimsize(dat,1)) datrow
-	make /O/Free /N=(dimsize(dat,0)) datrow
-
-
-//	SetScale/P x dimoffset(dat,1),dimdelta(dat,1),"", datrow
-	SetScale/P x dimoffset(dat,0),dimdelta(dat,0),"", datrow
-
-	Make/D/N=5/O W_coef
-//	W_coef[0] = {0.1e-9,1.64e-9,3,-3412,0}
-
-//	make /O /N=(dimsize(dat,0), 5) fitdata
-	make/o/n=(dimsize(dat,1), 5) fitdata
-	do
-//		datrow[] = dat[i][p]
-		datrow[] = dat[p][i]
-
-		wavestats /Q datrow
-		w_coef[0] = {(v_max-v_min), v_avg, 20, (v_maxLoc+(V_maxLoc-V_minLoc)/2),0}
-
-		FuncFit /Q Chargetransition W_coef datrow /D
-
-		fitdata[i][] = w_coef[q]
-		i+=1
-//	while (i<dimsize(dat, 0))
-	while (i<dimsize(dat, 1))
-
-End
 
 Function Chargetransition(w,x) : FitFunc
 	Wave w
@@ -756,11 +730,11 @@ Function Chargetransition(w,x) : FitFunc
 	//CurveFitDialog/ Independent Variables 1
 	//CurveFitDialog/ x
 	//CurveFitDialog/ Coefficients 5
-	//CurveFitDialog/ w[0] = G0
-	//CurveFitDialog/ w[1] = G2
+	//CurveFitDialog/ w[0] = Amp
+	//CurveFitDialog/ w[1] = Const
 	//CurveFitDialog/ w[2] = Theta
-	//CurveFitDialog/ w[3] = Vmid
-	//CurveFitDialog/ w[4] = gamma
+	//CurveFitDialog/ w[3] = Mid
+	//CurveFitDialog/ w[4] = Linear
 
 	return w[0]*tanh((x - w[3])/(2*w[2])) + w[4]*x + w[1]
 End

@@ -295,7 +295,7 @@ function CorrectChargeSensor([bd, bdchannelstr, dmmid, fd, fdchannelstr, fadcID,
 	wave/T dacvalstr
 	wave/T fdacvalstr
 
-	natarget = paramisdefault(natarget) ? 0.13 : natarget // 
+	natarget = paramisdefault(natarget) ? 2.9 : natarget // 
 	direction = paramisdefault(direction) ? 1 : direction
 	zero_tol = paramisdefault(zero_tol) ? 0.5 : zero_tol  // How close to zero before it starts to get more averaged measurements
 
@@ -535,10 +535,10 @@ function saveLogsOnly([msg])
 		msg = "SaveLogsOnly"
 	endif
 
-	variable hdfid = initOpenSaveFiles(0)
+	variable hdfid = OpenHDFFile(0)
 	LogsOnlySave(hdfid, msg)
 //	initSaveFiles(msg=msg, logs_only=1) // Saves logs here, and adds Logs_Only attr to root group of HDF
-	initcloseSaveFiles(num2str(hdfid))
+	closeHDFFile(num2str(hdfid))
 end
 
 

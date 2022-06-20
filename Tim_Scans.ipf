@@ -100,7 +100,7 @@ function checkPinchOffs(instrID, channels, gate_names, ohmic_names, max_bias, [r
 
 	string buffer
 	sprintf buffer, "Pinch off, Gates=%s, Ohmics=%s", gate_names, ohmic_names
-	ScanFastDAC(instrID, 0, max_bias, channels, sweeprate=300, x_label=gate_names+" /mV", y_label="Current /nA", comments=buffer, nosave=nosave)
+	ScanFastDAC(instrID, 0, max_bias, channels, sweeprate=300, x_label=gate_names+" /mV", y_label="Current /nA", comments=buffer, nosave=nosave, repeats=2, alternate=1)
 	if (reset_zero)
 		rampmultiplefdac(instrID, channels, 0)
 	endif
@@ -127,7 +127,7 @@ function DotTuneAround(x, y, width_x, width_y, channelx, channely, [sweeprate, r
 	variable sweeprate, numptsy
 	string channelx, channely, csname, additional_comments
 
-	variable natarget = 2.2   // ADC reading in mV to get most sensitive part of CS
+	variable natarget = 1.2   // ADC reading in mV to get most sensitive part of CS
 	sweeprate = paramisdefault(sweeprate) ? 300 : sweeprate
 	numptsy = paramisdefault(numptsy) ? 21 : numptsy
 	csname = selectstring(paramisdefault(csname), csname, "CSQ")

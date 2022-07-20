@@ -226,6 +226,33 @@ function DisplayWave(w, [x_label, y_label])
 end
 
 
+function Display2DWaterfall(w, [x_label, y_label])
+	wave w
+	string x_label, y_label
+	variable num_repeats = DimSize(w, 1)
+	
+	x_label = selectstring(paramisdefault(x_label), x_label, "")
+	y_label = selectstring(paramisdefault(y_label), y_label, "")
+	
+	string name, wn = nameofwave(w)
+	sprintf name "%s_", wn
+	
+	dowindow/k $name
+	display/N=$name
+	TextBox/W=$name/C/N=textid/A=LT/X=1.00/Y=1.00/E=2 name
+	
+	variable i
+	for(i = 0; i < num_repeats; i++)
+       AppendToGraph/W=$name w[][i]
+	endfor
+	
+	Label/W=$name left y_label
+	Label/W=$name bottom, x_label
+	
+	makecolorful()
+	
+end
+
 
 function Display3VarScans(wavenamestr, [v1, v2, v3, uselabels, usecolorbar, diffchargesense, switchrowscols, scanset, showentropy])
 // This function is for displaying plots from 3D/4D/5D scans (i.e. series of 2D scans where other parameters are changed between each scan)

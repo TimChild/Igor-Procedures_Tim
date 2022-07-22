@@ -241,11 +241,15 @@ function Display2DWaterfall(w, [x_label, y_label])
 	display/N=$name
 	TextBox/W=$name/C/N=textid/A=LT/X=1.00/Y=1.00/E=2 name
 	
+//	Legend/C/N=text0/J/A=M
+	
 	variable i
 	for(i = 0; i < num_repeats; i++)
        AppendToGraph/W=$name w[][i]
 	endfor
 	
+//   Legend/C/N=text0/J/A=MC "\\s(dat187current_2d) repeat 1\r\\s(dat187current_2d#1) repeat 2\r\\s(dat187current_2d#2) repeat 3\r\\s(dat187current_2d#3) repeat 4";DelayUpdate
+//   AppendText "\\s(dat187current_2d#4) repeat 5"
 	Label/W=$name left y_label
 	Label/W=$name bottom, x_label
 	

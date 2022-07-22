@@ -599,3 +599,28 @@ end
 
 
 
+
+
+function QPCShockCheck(InstrID, channels, [scan_time, max_voltage, steps])
+   variable InstrID
+	string channels
+	variable scan_time, max_voltage, steps
+	
+	
+	scan_time = paramisdefault(scan_time)? 30 : scan_time
+	max_voltage = paramisdefault(max_voltage)? -1200 : max_voltage
+	steps = paramisdefault(steps)? 50 : steps
+	
+	print "Bale CSQ -- CSS || Waitime Test -- 0 -> [-%d -> %d]\r", steps, max_voltage
+
+	variable i
+	variable sweeprate
+	for(i = -steps; abs(i) <= abs(max_voltage); i-=steps)
+       printf "Scanning 0 -> %d\r"i
+       sweeprate = abs(i/scan_time)
+       ScanFastDAC(InstrID, 0, i, channels, sweeprate=sweeprate, delay=0, repeats=6, alternate=1)
+
+	endfor
+	
+	
+end

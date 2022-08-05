@@ -106,28 +106,35 @@ function checkPinchOffs(instrID, channels, gate_names, ohmic_names, max_bias, [r
 	endif
 end
 
-function PinchTestBD(bd, start, fin, channels, numpts, delay, ramprate, current_wave, cutoff_nA, gate_names, ohmic_names)
-	/// For testing pinch off (12/2021)
+function checkPinchOffsSlow(instrID, start, fin, channels, numpts, delay, ramprate, current_wave, cutoff_nA, gate_names, ohmic_names, [is_bd])
+	/// For testing pinch off (07/2022)
 	// Make sure current wave is in nA
-	variable bd, start, fin, numpts, delay, ramprate, cutoff_nA
+	variable instrID, start, fin, numpts, is_bd, delay, ramprate, cutoff_nA
 	string channels, current_wave, gate_names, ohmic_names
 	
 	gate_names = selectString(strlen(gate_names)>0, channels, gate_names)
-
-	rampmultiplebd(bd, channels, 0, ramprate=ramprate)
+	
 	string comment
 	sprintf comment, "Pinch off, Gates=%s, Ohmics=%s", gate_names, ohmic_names
-	ScanBabyDACUntil(bd, start, fin, channels, numpts, delay, current_wave, cutoff_nA, ramprate=ramprate, operator="<", y_label="Current /nA", comments=comment)
-	rampmultiplebd(bd, channels, 0, ramprate=ramprate)
+
+	if (is_bd)
+		rampmultiplebd(instrID, channels, 0, ramprate=ramprate)	
+		ScanBabyDACUntil(instrID, start, fin, channels, numpts, delay, current_wave, cutoff_nA, ramprate=ramprate, operator="<", y_label="Current /nA", comments=comment)
+		rampmultiplebd(instrID, channels, 0, ramprate=ramprate)
+	else
+		rampmultiplefdac(instrID, channels, 0, ramprate=ramprate)	
+		scanfastDacSlow(instrID, start, fin, channels, numpts, delay, ramprate, until_checkwave=current_wave, until_stop_val=cutoff_nA, until_operator="<", y_label="Current /nA", comments=comment)
+		rampmultiplefdac(instrID, channels, 0, ramprate=ramprate)
+	endif
 end
 
-function DotTuneAround(x, y, width_x, width_y, channelx, channely, [sweeprate, ramprate_x, numptsy, y_is_bd, csname, nosave, additional_comments])
+function DotTuneAround(x, y, width_x, width_y, channelx, channely, [sweeprate, ramprate_x, numptsy, y_is_bd, csname, nosave, additional_comments, fadcchannel])
 // Goes to x, y. Sets charge sensor to target_current. Scans2D around x, y +- width.
-	variable x, y, width_x, width_y, ramprate_x, nosave, y_is_bd
+	variable x, y, width_x, width_y, ramprate_x, nosave, y_is_bd, fadcchannel
 	variable sweeprate, numptsy
 	string channelx, channely, csname, additional_comments
 
-	variable natarget = 1.2   // ADC reading in mV to get most sensitive part of CS
+	variable natarget = 19.9   // ADC reading in mV to get most sensitive part of CS
 	sweeprate = paramisdefault(sweeprate) ? 300 : sweeprate
 	numptsy = paramisdefault(numptsy) ? 21 : numptsy
 	csname = selectstring(paramisdefault(csname), csname, "CSQ")
@@ -142,7 +149,7 @@ function DotTuneAround(x, y, width_x, width_y, channelx, channely, [sweeprate, r
 		rampmultiplefdac(fd, channely, y)
 	endif
 
-	CorrectChargeSensor(fd=fd, fdchannelstr=csname, fadcID=fd, fadcchannel=0, check=0, natarget=natarget, direction=1)
+	CorrectChargeSensor(fd=fd, fdchannelstr=csname, fadcID=fd, fadcchannel=fadcchannel, check=0, natarget=natarget, direction=1)
 	if (y_is_bd)
 		ScanFastDAC2D(fd, x-width_x, x+width_x, channelx, y-width_y, y+width_y, channely, numptsy, bdID = bd, sweeprate=sweeprate, rampratex=ramprate_x, nosave=nosave, comments="Dot Tuning, "+additional_comments)
 	else
@@ -337,9 +344,14 @@ function TimStepTempScanSomething()
 	svar ls370
 
 	make/o targettemps =  {300, 275, 250, 225, 200, 175, 150, 125, 100, 75, 50, 40, 30, 20}
-//	make/o targettemps =  {300, 250, 200, 150, 100, 75, 50, 35}
+	make/o targettemps =  {300, 250, 200, 150, 100, 75, 50, 35}
+//   make/o targettemps =  {50, 100, 150, 200, 250, 300}
 	setLS370exclusivereader(ls370,"mc")
 
+   // Scan at current temp
+//	ScanTransition(sweeprate=width/5, width=width, repeats=100, center_first=1, center_gate="ACC*2", center_width=10, sweep_gate="ACC*400", csqpc_gate="CSQ", additional_comments="Temp = " + num2str(targettemps[i]) + " mK")
+   ScanTransition(sweeprate=500, width=1000, repeats=2, center_first=1, center_gate="P*2", center_width=20, sweep_gate="P*200",alternate=1)
+    
 	variable width
 	variable i=0
 	do
@@ -448,10 +460,10 @@ end
 
 
 
-function ScanTransition([num_scans, sweeprate, width, ramprate, repeats, center_first, center_gate, center_width, sweep_gate, additional_comments, mid, cs_target, csqpc_gate, alternate])
-	variable num_scans, sweeprate, width, ramprate, repeats, center_first, center_width, mid, cs_target, alternate
+function ScanTransition([num_scans, sweeprate, width, ramprate, repeats, center_first, center_gate, center_width, sweep_gate, additional_comments, mid, cs_target, csqpc_gate, alternate, fadcchannel])
+	variable num_scans, sweeprate, width, ramprate, repeats, center_first, center_width, mid, cs_target, alternate, fadcchannel
 	string center_gate, sweep_gate, additional_comments, csqpc_gate
-	nvar fd
+	nvar fd = fd
 
 	num_scans = (num_scans == 0) ? 1 : num_scans
 	sweeprate = paramisdefault(sweeprate) ? 100 : sweeprate
@@ -477,9 +489,9 @@ function ScanTransition([num_scans, sweeprate, width, ramprate, repeats, center_
 			printf "Centered at %s=%.2f mV\r" center_gate, center_gate_mid
 			rampmultiplefdac(fd, sweep_gate, -width*0.5, ramprate=ramprate)
 			if (!paramisdefault(cs_target))
-				CorrectChargeSensor(fd=fd, fdchannelstr="CSQ", fadcID=fd, fadcchannel=0, check=0, direction=1, natarget=cs_target)
+				CorrectChargeSensor(fd=fd, fdchannelstr="CSQ", fadcID=fd, fadcchannel=fadcchannel, check=0, direction=1, natarget=cs_target)
 			else
-				CorrectChargeSensor(fd=fd, fdchannelstr="CSQ", fadcID=fd, fadcchannel=0, check=0, direction=1)
+				CorrectChargeSensor(fd=fd, fdchannelstr="CSQ", fadcID=fd, fadcchannel=fadcchannel, check=0, direction=1)
 			endif
 		endif
 		sprintf comments, "transition"
@@ -601,24 +613,25 @@ end
 
 
 
-function QPCShockCheck(InstrID, channels, [scan_time, max_voltage, steps])
+function QPCProbe(InstrID, channels, [scan_time, max_voltage, steps, delay, repeats, comments])
    variable InstrID
-	string channels
-	variable scan_time, max_voltage, steps
+	string channels, comments
+	variable scan_time, max_voltage, steps, delay, repeats
 	
 	
 	scan_time = paramisdefault(scan_time)? 30 : scan_time
 	max_voltage = paramisdefault(max_voltage)? -1200 : max_voltage
 	steps = paramisdefault(steps)? 50 : steps
+	delay = paramisdefault(delay)? 0 : delay
+	repeats = paramisdefault(repeats)? 6 : repeats
+	comments = selectstring(paramisdefault(comments), comments, "")
 	
-	print "Bale CSQ -- CSS || Waitime Test -- 0 -> [-%d -> %d]\r", steps, max_voltage
-
 	variable i
 	variable sweeprate
 	for(i = -steps; abs(i) <= abs(max_voltage); i-=steps)
        printf "Scanning 0 -> %d\r"i
        sweeprate = abs(i/scan_time)
-       ScanFastDAC(InstrID, 0, i, channels, sweeprate=sweeprate, delay=0, repeats=6, alternate=1)
+       ScanFastDAC(InstrID, 0, i, channels, sweeprate=sweeprate, delay=delay, repeats=repeats, alternate=1)
 
 	endfor
 	

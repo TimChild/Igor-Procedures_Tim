@@ -295,7 +295,7 @@ function CorrectChargeSensor([bd, bdchannelstr, dmmid, fd, fdchannelstr, fadcID,
 	wave/T dacvalstr
 	wave/T fdacvalstr
 
-	natarget = paramisdefault(natarget) ? 2.9 : natarget // 
+	natarget = paramisdefault(natarget) ? 19.9 : natarget // 
 	direction = paramisdefault(direction) ? 1 : direction
 	zero_tol = paramisdefault(zero_tol) ? 0.5 : zero_tol  // How close to zero before it starts to get more averaged measurements
 
@@ -457,7 +457,7 @@ function CenterOnTransition([gate, virtual_gates, width, single_only])
 	string gate, virtual_gates
 	variable width, single_only
 
-	nvar fd
+	nvar fd=fd
 
 	gate = selectstring(paramisdefault(gate), gate, "ACC*2")
 	width = paramisdefault(width) ? 20 : width

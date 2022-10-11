@@ -169,9 +169,20 @@ function DisplayMultiple(datnums, name_of_wave, [diff, x_label, y_label])
 	string name_of_wave, x_label, y_label
 	variable diff
 
-	x_label = selectstring(paramisdefault(x_label), x_label, "")
-	y_label = selectstring(paramisdefault(y_label), y_label, "")
-	
+	if (paramisDefault(x_label))
+		struct ScanVars S
+		scv_getLastScanVars(S)   
+		x_label = S.x_label
+	endif
+	if (paramisDefault(y_label))
+		struct ScanVars S2
+		scv_getLastScanVars(S2)   
+		y_label = S2.y_label
+	endif
+
+//	x_label = selectstring(paramisdefault(x_label), x_label, "")
+//	y_label = selectstring(paramisdefault(y_label), y_label, "")
+
 	string window_name
 	sprintf window_name, "Dats%dto%d", datnums[0], datnums[numpnts(datnums)-1]
 	dowindow/k $window_name
@@ -308,6 +319,14 @@ function Display3VarScans(wavenamestr, [v1, v2, v3, uselabels, usecolorbar, diff
 				make/o/t varlabels = {"LP", "LCSS", ""}
 				make/o/t axislabels = {"LCT", "LCB"} //y, x
 				break
+			case 3:
+				datstart = 337
+				v1gmax = 2; v2gmax = 6; v3gmax = 4 //Have to make global to use NumVarOrDefault...
+				v1start = 10; v2start = -200; v3start = -450
+				v1step = 90; v2step = -20; v3step = -50
+				make/o/t varlabels = {"Bias", "Nose", "Plunger"}
+				make/o/t axislabels = {"CSS", "RC1"} //y, x
+				break				
 		endswitch
 	endif
 
@@ -859,3 +878,71 @@ function udh5()
    print numloaded, "waves uploaded"
 end
 
+
+
+
+function display_calibration_accuracy(w)
+	wave w
+	
+	string new_wn = nameofwave(w)+"_accuracy"
+	
+	duplicate/o w $new_wn
+	
+	wave nw = $new_wn
+	
+	nw -= x
+	display nw
+	label bottom "Applied V /mV"
+	label left "Difference from Nominal /mV"
+end
+
+function display_all_calibration()
+	wave v1, v2, v3, v4
+	display_calibration_accuracy(v1)
+	display_calibration_accuracy(v2)
+	display_calibration_accuracy(v3)
+	display_calibration_accuracy(v4)	
+end
+
+
+
+
+//////////////////////////////////////////////////////////
+
+
+function plot_differential_conductance(current_wave, [smoothing_factor, x_label, y_label])
+	wave current_wave
+	variable smoothing_factor
+	string x_label, y_label
+	
+	x_label = selectstring(paramisdefault(x_label), x_label, "")
+	y_label = selectstring(paramisdefault(y_label), y_label, "")
+	smoothing_factor = paramisDefault(smoothing_factor) ? 1 : smoothing_factor
+
+	string graph_name = "dIdVGraph"
+	svar sc_colormap
+	
+	string wn = nameofwave(current_wave) + "_dIdV"
+	duplicate/o current_wave $wn
+	wave w = $wn
+	variable smooth_num = round(smoothing_factor*DimSize(w, 0)/20)
+	smooth/dim=0/E=3 smooth_num, w
+	differentiate w
+	w[,smooth_num] = NaN
+	w[dimsize(w, 0)-smooth_num,] = NaN
+
+	
+	// Display the data
+	KillWindow/z $graph_name
+	display/k=1 /N=$graph_name
+
+	setwindow kwTopWin, graphicsTech=0
+	appendimage $wn
+	modifyimage $wn ctab={*, *, $sc_ColorMap, 0}
+	ColorScale/C/N=colorbar/A=RC/E image=$wn
+	Label left, y_label
+	Label bottom, x_label
+	TextBox/W=$graph_name/C/N=textid/A=LT/X=1.00/Y=1.00/E=2 wn
+//	setaxis bottom, $wn[x][smooth_num], *
+	
+end

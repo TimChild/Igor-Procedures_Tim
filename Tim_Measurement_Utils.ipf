@@ -286,18 +286,19 @@ end
 
 
 
-function CorrectChargeSensor([bd, bdchannelstr, dmmid, fd, fdchannelstr, fadcID, fadcchannel, i, check, natarget, direction, zero_tol])
+function CorrectChargeSensor([bd, bdchannelstr, dmmid, fd, fdchannelstr, fadcID, fadcchannel, i, check, natarget, direction, zero_tol, gate_divider])
 //Corrects the charge sensor by ramping the CSQ in 1mV steps
 //(direction changes the direction it tries to correct in)
-	variable bd, dmmid, fd, fadcID, fadcchannel, i, check, natarget, direction, zero_tol
+	variable bd, dmmid, fd, fadcID, fadcchannel, i, check, natarget, direction, zero_tol, gate_divider
 	string fdchannelstr, bdchannelstr
 	variable cdac, cfdac, current, new_current, nextdac, j
 	wave/T dacvalstr
 	wave/T fdacvalstr
 
-	natarget = paramisdefault(natarget) ? 19.9 : natarget // 
+	natarget = paramisdefault(natarget) ? 1.65 : natarget // 
 	direction = paramisdefault(direction) ? 1 : direction
 	zero_tol = paramisdefault(zero_tol) ? 0.5 : zero_tol  // How close to zero before it starts to get more averaged measurements
+	gate_divider = paramisdefault(gate_divider) ? 1 : gate_divider
 
 	if ((paramisdefault(bd) && paramisdefault(fd)) || !paramisdefault(bd) && !paramisdefault(fd))
 		abort "Must provide either babydac OR fastdac id"
@@ -340,7 +341,7 @@ function CorrectChargeSensor([bd, bdchannelstr, dmmid, fd, fdchannelstr, fadcID,
 	endif
 
 	variable end_condition = (naTarget == 0) ? zero_tol : 0.05*naTarget   // Either 5% or just an absolute zero_tol given
-
+	variable step_multiplier = 1
 	variable avg_len = 0.001// Starting time to avg, will increase as it gets closer to ideal value
 	if (abs(current-natarget) > end_condition/2)  // If more than half the end_condition out
 		variable start_time = datetime
@@ -353,14 +354,22 @@ function CorrectChargeSensor([bd, bdchannelstr, dmmid, fd, fdchannelstr, fadcID,
 				cdac = str2num(fdacvalstr[fdchannel][1])
 			endif
 
-			if (current < nAtarget)  // Choose next step direction
-				nextdac = cdac+0.32*direction  // 0.305... is FastDAC resolution (20000/2^16)
+			if (abs(current-natarget) > 15*end_condition)
+				step_multiplier = 10
+			elseif (abs(current-natarget) > 10*end_condition)
+				step_multiplier = 3			
 			else
-				nextdac = cdac-0.32*direction
+				step_multiplier = 1
+			endif
+
+			if (current < nAtarget)  // Choose next step direction
+				nextdac = cdac+step_multiplier*(0.32*direction)*gate_divider  // 0.305... is FastDAC resolution (20000/2^16)
+			else
+				nextdac = cdac-step_multiplier*(0.32*direction)*gate_divider
 			endif
 
 			if (check==0) //no user input
-				if (-1100 < nextdac && nextdac < 100) //Prevent it doing something crazy
+				if (-1000*gate_divider < nextdac && nextdac < 100*gate_divider) //Prevent it doing something crazy
 					if (!paramisdefault(bd))
 						rampmultiplebd(bd, num2str(bdchannel), nextdac)
 					else
@@ -457,7 +466,7 @@ function CenterOnTransition([gate, virtual_gates, width, single_only])
 	string gate, virtual_gates
 	variable width, single_only
 
-	nvar fd=fd
+	nvar fd=fd2
 
 	gate = selectstring(paramisdefault(gate), gate, "ACC*2")
 	width = paramisdefault(width) ? 20 : width

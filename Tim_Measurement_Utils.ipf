@@ -3,6 +3,22 @@
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 
+function/wave average_to_1d(w)
+	wave w
+	duplicate/o w tempwave
+
+	variable numptxs = dimsize(tempwave, 0) // 1 = number of columns ,,, 0 = number of rows
+	make/O/N=(numptxs) temp_average
+
+	variable i
+	for(i=0;i<numptxs;i++)
+		duplicate/o/r=[i][] tempwave tempwave_1d
+		temp_average[i] = mean(tempwave_1d)
+	endfor
+
+	return temp_average
+end
+
 ////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////// Setting up AWG ///////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////
@@ -42,7 +58,7 @@ function makeSquareWaveAWG(instrID, v0, vP, vM, v0len, vPlen, vMlen, wave_num, [
    // Ensure that ramplen is not too long (will never reach setpoints)
    variable i=0
    for(i=0;i<numpnts(lens);i++)
-    if (lens[i] < ramplen)
+    if (lens[i] < ramplen && lens[1] != 0)
       msg = "Do you really want to ramp for longer than the duration of a setpoint? You will never reach the setpoint"
       ans = ask_user(msg, type=1)
       if (ans == 2)
@@ -78,7 +94,7 @@ function makeSquareWaveAWG(instrID, v0, vP, vM, v0len, vPlen, vMlen, wave_num, [
          // where to ramp from. Obviously this does not work for the first wave length, is that avoidable?
          ramp_step = (sps[i] - prev_setpoint)/(ramp_per_setpoint + 1)
          for (k = 1; k < ramp_per_setpoint+1; k++)
-          // THINK ABOUT CASE CASE RAMPLEN 0 -> ramp_setpoint_furation = 0
+          // THINK ABOUT CASE RAMPLEN 0 -> ramp_setpoint_duration = 0
           numSamples = round(ramp_setpoint_duration * measureFreq)
           awg_sqw[j][0] = {prev_setpoint + (ramp_step * k)}
           awg_sqw[j][1] = {numSamples}
@@ -86,7 +102,7 @@ function makeSquareWaveAWG(instrID, v0, vP, vM, v0len, vPlen, vMlen, wave_num, [
          endfor
          numSamples = round((lens[i]-ramplen)*measureFreq)  // Convert to # samples
          if(numSamples == 0)  // Prevent adding zero length setpoint
-            abort "ERROR[Set_multi_square_wave]: trying to add setpoint with zero length, duration too short for sampleFreq"
+            abort "ERROR[makeSquareWaveAWG]: trying to add setpoint with zero length, duration too short for sampleFreq"
          endif
          awg_sqw[j][0] = {sps[i]}
          awg_sqw[j][1] = {numSamples}
@@ -98,7 +114,7 @@ function makeSquareWaveAWG(instrID, v0, vP, vM, v0len, vPlen, vMlen, wave_num, [
 
     // Check there is a awg_sqw to add
    if(numpnts(awg_sqw) == 0)
-      abort "ERROR[Set_multi_square_wave]: No setpoints added to awg_sqw"
+      abort "ERROR[makeSquareWaveAWG]: No setpoints added to awg_sqw"
    endif
 
     // Clear current wave and then reset with new awg_sqw
@@ -135,7 +151,7 @@ function SetupEntropySquareWaves([freq, cycles, hqpc_plus, hqpc_minus, channel_r
 	makeSquareWaveAWG(fd, 0, cplus, cminus, spt, spt, spt, 1, ramplen=ramplen)
 
 	// Setup AWG
-	setupAWG(fd, AWs="0,1", DACs="OHC(10M),OHV*1000", numCycles=cycles)
+	setupAWG(fd, AWs="0,1", DACs="OHC(10M),OHV*9950", numCycles=cycles, verbose=1)
 end
 
 
@@ -170,54 +186,6 @@ end
 
 
 
-function Set_multi_square_wave(instrID, v0, vP, vM, v0len, vPlen, vMlen, wave_num)
-   // Wrapper around fdAWG_add_wave to make square waves with form v0, +vP, v0, -vM (useful for Tim's Entropy)
-   // To make simple square wave set length of unwanted setpoints to zero.
-   variable instrID, v0, vP, vM, v0len, vPlen, vMlen, wave_num  // lens in seconds
-
-   // TODO: need to make a warning that if changing ADC frequency that AWG_frequency changes
-
-   // put into wave to make it easier to work with
-   make/o/free sps = {v0, vP, vM}
-   make/o/free lens = {v0len, vPlen, vMlen}
-
-   // Sanity check on period
-   // Note: limit checks happen in AWG_RAMP
-   if (sum(lens) > 1)
-      string msg
-      sprintf msg "Do you really want to make a square wave with period %.3gs?", sum(lens)
-      variable ans = ask_user(msg, type=1)
-      if (ans == 2)
-         abort "User aborted"
-      endif
-   endif
-
-   // make wave to store setpoints/sample_lengths
-   make/o/free/n=(-1, 2) awg_sqw
-
-   variable samplingFreq = getFADCspeed(instrID)  // Gets sampling rate of FD (Note: NOT measureFreq here)
-   variable numSamples = 0
-
-   variable i=0, j=0
-   for(i=0;i<numpnts(sps);i++)
-      if(lens[i] != 0)  // Only add to wave if duration is non-zero
-         numSamples = round(lens[i]*samplingFreq)  // Convert to # samples
-         if(numSamples == 0)  // Prevent adding zero length setpoint
-            abort "ERROR[Set_multi_square_wave]: trying to add setpoint with zero length, duration too short for sampleFreq"
-         endif
-         awg_sqw[j] = {sps[i], numSamples}
-         j++
-      endif
-   endfor
-
-   if(numpnts(awg_sqw) == 0)
-      abort "ERROR[Set_multi_square_wave]: No setpoints added to awg_sqw"
-   endif
-
-   fd_clearAWGwave(instrID, wave_num)
-   fd_addAWGwave(instrID, wave_num, awg_sqw)
-   printf "Set square wave on AWG_wave%d", wave_num
-end
 
 
 
@@ -286,19 +254,24 @@ end
 
 
 
-function CorrectChargeSensor([bd, bdchannelstr, dmmid, fd, fdchannelstr, fadcID, fadcchannel, i, check, natarget, direction, zero_tol, gate_divider])
+function CorrectChargeSensor([bd, bdchannelstr, dmmid, fd, fdchannelstr, fadcID, fadcchannel, i, check, natarget, direction, zero_tol, gate_divider, cutoff_time])
 //Corrects the charge sensor by ramping the CSQ in 1mV steps
 //(direction changes the direction it tries to correct in)
-	variable bd, dmmid, fd, fadcID, fadcchannel, i, check, natarget, direction, zero_tol, gate_divider
+	variable bd, dmmid, fd, fadcID, fadcchannel, i, check, natarget, direction, zero_tol, gate_divider, cutoff_time
 	string fdchannelstr, bdchannelstr
 	variable cdac, cfdac, current, new_current, nextdac, j
 	wave/T dacvalstr
 	wave/T fdacvalstr
-
-	natarget = paramisdefault(natarget) ? 1.65 : natarget // 
+	
+	
+//	rampmultipleFDAC(fd, "CSQ2*1000", 0) // ensure virtual CSQ*1000 is zero.
+	
+	natarget = paramisdefault(natarget) ? 1.1 : natarget // 0.22
 	direction = paramisdefault(direction) ? 1 : direction
 	zero_tol = paramisdefault(zero_tol) ? 0.5 : zero_tol  // How close to zero before it starts to get more averaged measurements
-	gate_divider = paramisdefault(gate_divider) ? 1 : gate_divider
+	gate_divider = paramisdefault(gate_divider) ? 20 : gate_divider
+	cutoff_time = paramisdefault(cutoff_time) ? 30 : cutoff_time
+	fadcchannel = paramisdefault(fadcchannel) ? 1 : fadcchannel
 
 	if ((paramisdefault(bd) && paramisdefault(fd)) || !paramisdefault(bd) && !paramisdefault(fd))
 		abort "Must provide either babydac OR fastdac id"
@@ -413,7 +386,7 @@ function CorrectChargeSensor([bd, bdchannelstr, dmmid, fd, fdchannelstr, fadcID,
 			endif
 //			print avg_len
 			asleep(0.05)
-		while (abs(current-nAtarget) > end_condition && (datetime - start_time < 30))   // Until reaching end condition
+		while (abs(current-nAtarget) > end_condition && (datetime - start_time < cutoff_time))   // Until reaching end condition
 
 		if (!paramisDefault(i))
 			print "Ramped to " + num2str(nextdac) + "mV, at line " + num2str(i)
@@ -466,7 +439,7 @@ function CenterOnTransition([gate, virtual_gates, width, single_only])
 	string gate, virtual_gates
 	variable width, single_only
 
-	nvar fd=fd2
+	nvar fd=fd
 
 	gate = selectstring(paramisdefault(gate), gate, "ACC*2")
 	width = paramisdefault(width) ? 20 : width
@@ -582,4 +555,45 @@ function/wave Linspace(start, fin, num)
 	Make/N=2/O/Free linspace_start_end = {start, fin}
 	Interpolate2/T=1/N=(num)/Y=linspaced linspace_start_end
 	return linspaced
+end
+
+
+function calculate_virtual_starts_fins_using_ratio(sweep_mid, sweep_width, sweep_gate, virtual_gates, virtual_mids, virtual_ratios, channels, starts, fins)
+	// Given the sweepgate mid/width, and the virtual gate mids/ratios, returns the full channels, starts, fins for a virtual sweep
+	// Note: channels, starts, fins will be modified to have the return values (can't return more than 1 string in Igor)
+	string sweep_gate, virtual_gates, virtual_mids, virtual_ratios
+	string &channels, &starts, &fins // The & allows for modifying the string that was passed in
+	variable sweep_mid, sweep_width
+	
+	if ((itemsinList(virtual_gates, ",") != itemsinList(virtual_mids, ",")) || (itemsinList(virtual_gates, ",") != itemsinList(virtual_ratios, ",")))
+		abort "ERROR[calculate_virtual_starts_fins_using_ratio]: Virtual_gates, Virtual_mids, and virtual_ratios must all have the same number of items"
+	endif
+	
+	
+	starts = num2str(sweep_mid - sweep_width)
+	fins = num2str(sweep_mid + sweep_width)
+	channels = addlistitem(sweep_gate, virtual_gates, ",", 0)
+	
+	variable temp_mid, temp_ratio, temp_start, temp_fin
+	variable k
+	for (k=0; k<ItemsInList(virtual_gates, ","); k++)
+			temp_mid = str2num(StringFromList(k, virtual_mids, ","))
+			temp_ratio = str2num(StringFromList(k, virtual_ratios, ","))
+			
+			temp_start = temp_mid - temp_ratio*sweep_width
+			temp_fin = temp_mid + temp_ratio*sweep_width
+			
+			starts = addlistitem(num2str(temp_start), starts, ",", inf)
+			fins = addlistitem(num2str(temp_fin), fins, ",", inf)
+	 endfor
+	 
+end
+
+
+
+function/s wave2str(w)
+	wave w
+	string w2str = wave2NumArray(w)
+	
+	return w2str[1,strlen(w2str)-2]
 end

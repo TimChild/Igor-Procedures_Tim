@@ -124,20 +124,21 @@ function plot_waterfall(w, x_label, y_label, [y_spacing])
 	scg_setupGraph1D(WinName(0,1), x_label, y_label=y_label)
 end
 
-function DisplayDiff(w, [x_label, y_label, filenum])
+function DisplayDiff(w, [x_label, y_label, filenum, numpts])
 	wave w
 	string x_label, y_label
-	variable filenum
+	variable filenum, numpts
 	
-	x_label = selectstring(paramisdefault(x_label), x_label, "No x_label")
-	y_label = selectstring(paramisdefault(y_label), y_label, "No y_label")
+	x_label = selectstring(paramisdefault(x_label), x_label, "")
+	y_label = selectstring(paramisdefault(y_label), y_label, "")
+	numpts = paramisdefault(numpts) ? 150 : numpts	
 	
 	string window_name = ""
 	sprintf window_name, "%s__differentiated", nameofwave(w)
 	string wn = ""
 	sprintf wn, "%s__diffx", nameofwave(w)	
-	
-	wave tempwave = Diffwave(w)
+
+	wave tempwave = Diffwave(w, numpts=numpts)
 
 	dowindow/k $window_name
 	display/N=$window_name
@@ -154,11 +155,16 @@ function DisplayDiff(w, [x_label, y_label, filenum])
 end
 
 
-function/wave DiffWave(w)
+function/wave DiffWave(w, [numpts])
 	wave w
+	variable numpts
+	
+	numpts = paramisdefault(numpts) ? 150 : numpts
 	
 	duplicate/o w, tempwave
-	smooth/DIM=0 ceil(dimsize(w,0)/10), tempwave
+	print dimsize(w, 0)
+	print ceil(dimsize(w,0)/numpts)
+	resample/DIM=0 /down=(ceil(dimsize(w,0)/numpts)) tempwave
 	differentiate/DIM=0 tempwave	
 	return tempwave
 end
@@ -198,10 +204,13 @@ function DisplayMultiple(datnums, name_of_wave, [diff, x_label, y_label])
 		sprintf wn, "dat%d%s", datnum, name_of_wave
 		sprintf tempwn, "tempwave_%s", wn
 		duplicate/o $wn, $tempwn
-		wave tempwave = $tempwn
 		if (diff == 1)
-			wave tempwave2 = diffwave($tempwn)
-			tempwave = tempwave2
+			wave tempwave = diffwave($tempwn)
+			duplicate /o tempwave $tempwn
+			wave tempwave = $tempwn
+
+		else 
+			wave tempwave = $tempwn
 		endif
 		appendimage/W=$window_name tempwave
 		ModifyImage/W=$window_name $tempwn ctab= {*,*,VioletOrangeYellow,0}
